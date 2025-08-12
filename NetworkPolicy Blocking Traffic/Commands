@@ -1,0 +1,120 @@
+Recreate: Default-Deny Ingress breaks service-to-service calls:
+Create namespace & app:
+
+kubectl create ns np-lab
+kubectl -n np-lab create deploy web --image=nginx:1.25-alpine --replicas=1
+kubectl -n np-lab expose deploy web --port=80 --target-port=80
+kubectl -n np-lab run client --image=busybox:1.36 --restart=Never --command -- sleep 3600
+
+Apply a default-deny ingress:
+# deny-all-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: np-lab
+spec:
+  podSelector: {}          # selects all pods in namespace
+  policyTypes: ["Ingress"]
+
+
+kubectl apply -f deny-all-ingress.yaml
+# Test connectivity → should fail
+kubectl -n np-lab exec client -- wget -qO- http://web || echo "INGRESS BLOCKED"
+
+
+Resolve: allow client→web on TCP/80:
+# allow-web-from-same-namespace.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-same-ns
+  namespace: np-lab
+spec:
+  podSelector:
+    matchLabels:
+      app: web                 # Deployment web pods carry label app=web
+  policyTypes: ["Ingress"]
+  ingress:
+  - from:
+    - podSelector: {}          # any pod in np-lab (tighten as needed)
+    ports:
+    - protocol: TCP
+      port: 80
+
+kubectl apply -f allow-web-from-same-namespace.yaml
+kubectl -n np-lab exec client -- wget -qO- http://web | head -n1   # should return HTML
+
+-------------------------
+
+Recreate: Default-Deny Egress (break DNS and external):
+Deny all egress:
+# deny-all-egress.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: np-lab
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+
+kubectl apply -f deny-all-egress.yaml
+kubectl -n np-lab exec client -- nslookup kubernetes.default || echo "DNS BLOCKED"
+kubectl -n np-lab exec client -- wget -S --spider https://example.com || echo "EGRESS BLOCKED"
+
+
+Resolve: allow DNS and intra-namespace egress:
+
+# allow-egress-dns-and-web.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-and-same-ns
+  namespace: np-lab
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - { protocol: UDP, port: 53 }
+    - { protocol: TCP, port: 53 }
+  - to:
+    - podSelector: {}         # allow egress to other pods in same ns (optional)
+    ports:
+    - { protocol: TCP, port: 80 }
+    - { protocol: TCP, port: 443 }
+
+kubectl apply -f allow-egress-dns-and-web.yaml
+kubectl -n np-lab exec client -- nslookup kubernetes.default
+kubectl -n np-lab exec client -- wget -S --spider https://example.com
+
+
+Common selector pitfall: namespace labels:
+Policy expecting a labeled namespace:
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-ingress-ns
+  namespace: np-lab
+spec:
+  podSelector:
+    matchLabels: { app: web }
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: { role: ingress }   # requires labeling the source namespace
+    ports:
+    - { protocol: TCP, port: 80 }
+
+# If your ingress controller runs in 'ingress-nginx', label it:
+kubectl label ns ingress-nginx role=ingress --overwrite
+# Without this label, traffic remains blocked.
