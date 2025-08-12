@@ -1,0 +1,16 @@
+# 1) Is the ingress controller healthy & exposed?
+kubectl -n ingress-nginx get deploy,po,svc
+# Look for controller pods Ready, Service type (LoadBalancer/NodePort), and EXTERNAL-IP.
+
+# 2) Inspect the Ingress object
+kubectl -n <ns> describe ingress <ing>
+# Look for: IngressClass, Rules (Host/Path), Backends, Events (admission errors).
+
+# 3) Do endpoints exist for the Service referenced by the Ingress?
+kubectl -n <ns> get svc <svc> -o wide
+kubectl -n <ns> get endpoints <svc> -o wide
+
+# 4) Reproduce with correct Host header (critical!)
+ING_IP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -s -H 'Host: app.example.local' http://$ING_IP/health -i
+# If no LB IP (NodePort), use node IP and nodePort or `minikube service`.
