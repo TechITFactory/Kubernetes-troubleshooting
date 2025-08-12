@@ -1,0 +1,79 @@
+Recreate: memory hog → OOMKilled:
+app.py (allocate ~300 MiB progressively):
+
+import time
+blobs=[]
+print("Starting; will allocate memory in chunks...")
+for i in range(300):
+    blobs.append(bytearray(1_000_000))  # ~1 MiB
+    time.sleep(0.05)
+print("Allocated ~300 MiB; sleeping")
+time.sleep(600)
+
+Dockerfile:
+FROM python:3.11-slim
+WORKDIR /app
+COPY app.py .
+CMD ["python","/app/app.py"]
+
+
+Build & load: Minikube:
+eval $(minikube docker-env)
+docker build -t oom-demo:0.1 .
+
+
+deployment-bad.yaml (limits too low):
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oom-demo
+  namespace: oom-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: oom-demo } }
+  template:
+    metadata: { labels: { app: oom-demo } }
+    spec:
+      containers:
+      - name: app
+        image: oom-demo:0.1
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            memory: "128Mi"   # <— app allocates ~300 MiB → OOM
+
+Deploy & Observe:
+kubectl create ns oom-lab
+kubectl -n oom-lab apply -f deployment-bad.yaml
+kubectl -n oom-lab get pods -l app=oom-demo -w
+kubectl -n oom-lab describe pod -l app=oom-demo | egrep -i 'Last State|Reason|Exit|OOM'
+kubectl -n oom-lab logs deploy/oom-demo --previous --tail=50 || true
+# Expect: Reason: OOMKilled, Exit Code: 137; restarts increasing → CrashLoopBackOff
+
+
+Resolve: right-size memory or reduce usage:
+Option A — increase limit (and request):
+kubectl -n oom-lab patch deploy oom-demo -p '{
+  "spec":{"template":{"spec":{"containers":[{"name":"app","resources":{
+    "requests":{"memory":"256Mi","cpu":"100m"},"limits":{"memory":"512Mi"}}}]}}}
+}'
+kubectl -n oom-lab rollout status deploy/oom-demo
+kubectl -n oom-lab get pods -l app=oom-demo -w
+
+Option B — reduce app allocation:
+Edit app.py to allocate fewer chunks or release memory, rebuild as oom-demo:0.2, and update the image::
+# Example: only 100 MiB
+# for i in range(100): blobs.append(bytearray(1_000_000))
+docker build -t oom-demo:0.2 .
+# Minikube: eval $(minikube docker-env) && docker build -t oom-demo:0.2 .
+# Kind: kind load docker-image oom-demo:0.2
+kubectl -n oom-lab set image deploy/oom-demo app=oom-demo:0.2
+kubectl -n oom-lab rollout status deploy/oom-demo
+
+
+Verify:
+kubectl -n oom-lab describe pod -l app=oom-demo | egrep -i 'Last State|Reason|Restart'
+kubectl top pods -n oom-lab
+
