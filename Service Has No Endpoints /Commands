@@ -1,0 +1,101 @@
+Recreate: selector typo → Service has 0 endpoints:
+
+deploy.yaml:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.25-alpine
+        ports:
+        - name: http
+          containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: demo
+spec:
+  selector: { app: weeb }   # <— INTENTIONAL TYPO
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+
+Deploy & Observe:
+kubectl create ns demo
+kubectl apply -f deploy.yaml
+kubectl -n demo get svc web
+kubectl -n demo get endpoints web -o wide               # Expect: <none>
+kubectl -n demo get endpointslice -l kubernetes.io/service-name=web -o wide
+kubectl -n demo get pods -l app=web -o wide             # Pods are Running/Ready
+
+
+Resolve: fix the selector to match Pod labels
+# Patch the Service selector
+kubectl -n demo patch svc web -p '{"spec":{"selector":{"app":"web"}}}'
+# Re-check endpoints
+kubectl -n demo get endpoints web -o wide               # Now shows Pod IPs
+kubectl -n demo get endpointslice -l kubernetes.io/service-name=web -o wide
+---------------------
+
+Recreate: port mismatch (named port not found):
+bad-port-svc.yaml:
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-bad-port
+  namespace: demo
+spec:
+  selector: { app: web }
+  ports:
+  - name: http
+    port: 80
+    targetPort: api     # <— no container port named "api"
+
+Apply & Observe:
+kubectl -n demo apply -f bad-port-svc.yaml
+kubectl -n demo describe svc web-bad-port | sed -n '/Port:/,/Events/ p'
+kubectl -n demo get endpoints web-bad-port -o wide      # Expect: <none>
+
+Resolve (use correct name or number):
+kubectl -n demo patch svc web-bad-port -p '{"spec":{"ports":[{"name":"http","port":80,"targetPort":"http"}]}}'
+# or targetPort: 80
+kubectl -n demo get endpoints web-bad-port -o wide      # Endpoints appear
+
+-------------------------------
+
+(Optional) Namespace mismatch repro:
+Create Service in default while Pods live in demo:
+
+kubectl apply -n default -f - <<'YAML'
+apiVersion: v1
+kind: Service
+metadata:
+  name: cross-ns
+spec:
+  selector: { app: web }     # Pods exist in 'demo', not 'default'
+  ports: [{ port: 80, targetPort: 80 }]
+YAML
+
+kubectl -n default get endpoints cross-ns    # <none>
+# Fix: put the Service in 'demo' or move Pods/labels accordingly.
+kubectl -n default delete svc cross-ns
+
+Validate end-to-end:
+# (Optional) create a ClusterIP curl test pod
+kubectl -n demo run curl --image=busybox:1.36 --restart=Never --command -- sleep 3600
+kubectl -n demo exec curl -- wget -qO- http://web        # should print Nginx HTML
+
