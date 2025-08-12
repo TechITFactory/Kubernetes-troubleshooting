@@ -1,0 +1,18 @@
+# What does the HPA think?
+kubectl get hpa -A
+kubectl describe hpa <name> -n <ns>
+# Look for:
+# - Current CPU%/Memory% vs Target
+# - Events: "failed to get resource metrics", "did not receive metrics"
+# - Conditions: AbleToScale, ScalingActive, ScalingLimited
+
+# Are metrics available?
+kubectl top pods -n <ns>
+kubectl top nodes
+
+# Are Pods able to scale onto nodes?
+kubectl get pods -n <ns> | egrep 'Pending|Unschedulable'
+kubectl describe pod <pod> -n <ns> | sed -n '/Events/,$p'
+
+# Rollout state (if HPA fights a rollout)
+kubectl rollout status deploy/<workload> -n <ns>
