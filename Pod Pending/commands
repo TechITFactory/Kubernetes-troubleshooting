@@ -1,0 +1,121 @@
+pod-too-big.yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: too-big
+  labels: { app: too-big }
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","sleep 3600"]
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "32Gi"     # Intentionally larger than a single-node lab
+      limits:
+        memory: "32Gi"
+
+Deploy & Observe
+kubectl apply -f pod-too-big.yaml
+kubectl get pod too-big -w
+kubectl describe pod too-big | sed -n '/Events/,$p'
+# Expect: 0/1 nodes are available: Insufficient memory.
+
+
+Resolve (right-size requests)
+kubectl patch pod too-big -p '{"spec":{"containers":[{"name":"app","resources":{"requests":{"cpu":"100m","memory":"128Mi"},"limits":{"memory":"256Mi"}}}]}}'
+# Or delete, edit YAML, and re-apply
+kubectl delete pod too-big --wait
+kubectl apply -f pod-too-big.yaml   # after fixing memory to 128Mi/256Mi
+kubectl get pod too-big -w          # should move to Running
+
+--------
+Taint Without Toleration
+# Get the node name
+NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+kubectl taint nodes $NODE dedicated=batch:NoSchedule
+# Now any pod without that toleration cannot schedule here.
+
+pod-no-toleration.yaml
+  
+apiVersion: v1
+kind: Pod
+metadata:
+  name: no-toleration
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","sleep 3600"]
+
+Deploy & Observe
+kubectl apply -f pod-no-toleration.yaml
+kubectl describe pod no-toleration | sed -n '/Events/,$p'
+# Expect: node(s) had taint {dedicated=batch: NoSchedule}.
+
+Resolve (add toleration)
+# patch or edit
+spec:
+  tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "batch"
+    effect: "NoSchedule"
+
+kubectl patch pod no-toleration -p \
+'{"spec":{"tolerations":[{"key":"dedicated","operator":"Equal","value":"batch","effect":"NoSchedule"}]}}'
+kubectl get pod no-toleration -w   # should schedule now
+# Cleanup taint (optional)
+kubectl taint nodes $NODE dedicated=batch:NoSchedule-
+---------
+
+nodeSelector Mismatch:
+Label nothing yet, then schedule with a selector:
+cat <<'YAML' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-selector
+spec:
+  nodeSelector: { nodepool: highmem }   # no node has this label yet
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","sleep 3600"]
+YAML
+
+kubectl describe pod bad-selector | sed -n '/Events/,$p'
+# Expect: didn't match node selector.
+
+  Resolve by labeling the node
+NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+kubectl label node $NODE nodepool=highmem --overwrite
+kubectl get pod bad-selector -w  # should schedule now
+------------------
+
+(Storage): PVC Pending
+Create a PVC with a non-existent StorageClass
+
+cat <<'YAML' | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bogus-pvc
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: 1Gi } }
+  storageClassName: does-not-exist
+YAML
+kubectl get pvc bogus-pvc
+kubectl describe pvc bogus-pvc
+# Expect: Pending; no matches for StorageClass.
+
+  Resolve:
+Use the cluster’s default StorageClass (often named standard on Minikube/Kind CSI setups) or create a valid StorageClass.
+
+kubectl patch pvc bogus-pvc -p '{"spec":{"storageClassName":null}}'
+# Or delete & recreate with a valid storageClassName.
+
+  
