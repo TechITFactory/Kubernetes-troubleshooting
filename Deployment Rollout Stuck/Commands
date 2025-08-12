@@ -1,0 +1,119 @@
+Recreate: readiness path wrong + tight progress deadline:
+server.py (simple HTTP on /healthz and /):
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/healthz":
+            self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+        else:
+            self.send_response(200); self.end_headers(); self.wfile.write(b"hello")
+HTTPServer(("", 8080), H).serve_forever()
+
+
+Dockerfile:
+FROM python:3.11-slim
+WORKDIR /app
+COPY server.py .
+EXPOSE 8080
+CMD ["python","/app/server.py"]
+
+Build & load: Minikube
+eval $(minikube docker-env)
+docker build -t rollout-demo:0.1 .
+
+
+deployment-bad.yaml:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rollout-demo
+  namespace: rollout-lab
+spec:
+  replicas: 2
+  progressDeadlineSeconds: 60       # short for the lab
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0             # strict → easier to deadlock
+      maxSurge: 1
+  selector:
+    matchLabels: { app: rollout-demo }
+  template:
+    metadata:
+      labels: { app: rollout-demo }
+    spec:
+      containers:
+      - name: app
+        image: rollout-demo:0.1
+        ports: [{ containerPort: 8080, name: http }]
+        readinessProbe:
+          httpGet: { path: /readyz, port: 8080 }   # <— WRONG PATH
+          periodSeconds: 5
+          failureThreshold: 3
+
+
+Deploy & Observe:
+kubectl create ns rollout-lab
+kubectl -n rollout-lab apply -f deployment-bad.yaml
+kubectl -n rollout-lab rollout status deploy/rollout-demo --watch   # will time out ~60s
+kubectl -n rollout-lab describe deploy rollout-demo | sed -n '/Conditions/,$p'
+kubectl -n rollout-lab get pods -l app=rollout-demo -o wide
+kubectl -n rollout-lab describe pod -l app=rollout-demo | egrep -i 'Readiness|Events|Reason'
+
+
+Expected:
+Deployment condition: ProgressDeadlineExceeded.
+Pods Running but Ready=False due to bad readiness path.
+
+
+ Resolve: fix readiness, relax strategy if needed
+Fix option A — correct probe path:
+kubectl -n rollout-lab patch deploy rollout-demo -p '{
+  "spec":{"template":{"spec":{"containers":[{"name":"app","readinessProbe":{"httpGet":{"path":"/healthz","port":8080}}}]}}}
+}'
+kubectl -n rollout-lab rollout status deploy/rollout-demo --watch
+
+
+Fix option B — allow slight unavailability to unblock:
+kubectl -n rollout-lab patch deploy rollout-demo -p '{
+  "spec":{"strategy":{"rollingUpdate":{"maxUnavailable":1,"maxSurge":1}}}
+}'
+
+
+Verify:
+kubectl -n rollout-lab get deploy rollout-demo -o wide
+kubectl -n rollout-lab get rs -l app=rollout-demo
+kubectl -n rollout-lab get pods -l app=rollout-demo -o wide
+----------------------------
+
+init container blocks progress:
+deployment-init-bad.yaml:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rollout-init
+  namespace: rollout-lab
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 60
+  selector: { matchLabels: { app: rollout-init } }
+  template:
+    metadata: { labels: { app: rollout-init } }
+    spec:
+      initContainers:
+      - name: init
+        image: busybox:1.36
+        command: ["sh","-c","echo migrating...; exit 1"]   # fails → main never starts
+      containers:
+      - name: app
+        image: rollout-demo:0.1
+        ports: [{ containerPort: 8080 }]
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+
+Deploy & Observe:
+kubectl -n rollout-lab apply -f deployment-init-bad.yaml
+kubectl -n rollout-lab rollout status deploy/rollout-init --watch
+kubectl -n rollout-lab describe pod -l app=rollout-init | sed -n '/Init Containers:/,/Containers:/p'
