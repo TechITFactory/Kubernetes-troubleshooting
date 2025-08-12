@@ -1,0 +1,90 @@
+Recreate: Pod referencing a missing ConfigMap & Secret
+bad-pod.yaml
+  apiVersion: v1
+kind: Pod
+metadata:
+  name: config-error-demo
+  labels: { app: config-error-demo }
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","env | sort; sleep 3600"]
+    envFrom:
+    - configMapRef: { name: app-config }         # does not exist yet
+    - secretRef:    { name: db-credentials }     # does not exist yet
+    volumeMounts:
+    - name: app-config-vol
+      mountPath: /etc/app
+  volumes:
+  - name: app-config-vol
+    configMap:
+      name: app-config
+
+
+Deploy & Observe
+kubectl apply -f bad-pod.yaml
+kubectl get pod config-error-demo -w
+kubectl describe pod config-error-demo | sed -n '/Events/,$p'
+# Expect: State: Waiting  Reason: CreateContainerConfigError
+# Events naming missing 'app-config' and 'db-credentials'
+
+
+  Resolve: create the missing objects (or fix names/keys)
+Create ConfigMap & Secret:
+
+kubectl create configmap app-config \
+  --from-literal=LOG_LEVEL=debug \
+  --from-literal=FEATURE_X=enabled
+
+kubectl create secret generic db-credentials \
+  --from-literal=DATABASE_URL='postgres://demo:demo@postgres:5432/app'
+
+(If keys were wrong) Example of key-specific envs
+  # patch example: use explicit key reference
+env:
+- name: DATABASE_URL
+  valueFrom:
+    secretKeyRef:
+      name: db-credentials
+      key: DATABASE_URL
+
+  Recreate or let kubelet retry
+For a bare Pod, easiest is delete & re-apply; for a Deployment, a rollout occurs automatically when the template changes.
+kubectl delete pod config-error-demo --wait
+kubectl apply -f bad-pod.yaml
+kubectl get pod config-error-demo -w
+kubectl logs config-error-demo | head
+# You should now see env vars printed; Pod is Running.
+
+
+Variant: wrong key name inside ConfigMap
+broken-keys.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-key-demo
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","cat /etc/app/app.conf || true; sleep 3600"]
+    volumeMounts:
+    - name: cfg
+      mountPath: /etc/app
+  volumes:
+  - name: cfg
+    configMap:
+      name: app-config
+      items:
+      - key: app.conf       # if this key doesn't exist → CreateContainerConfigError
+        path: app.conf
+
+  Reproduce & Fix
+kubectl apply -f broken-keys.yaml
+kubectl describe pod bad-key-demo | sed -n '/Events/,$p'
+# Fix by adding the missing key:
+kubectl create configmap app-config --from-literal=app.conf='PORT=8080' --dry-run=client -o yaml | kubectl apply -f -
+# Or edit the items[].key to an existing key name.
+kubectl delete pod bad-key-demo --wait && kubectl apply -f broken-keys.yaml
+
