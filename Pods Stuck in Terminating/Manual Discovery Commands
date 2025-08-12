@@ -1,0 +1,14 @@
+# Find pods stuck terminating
+kubectl get pods -A | egrep 'Terminating'
+
+# Inspect events and container states
+kubectl describe pod <pod> -n <ns>
+# Look for: "PreStop hook", "Killing container", long-running hooks, volume umount/attach/detach errors
+
+# See recent logs around shutdown
+kubectl logs <pod> -n <ns> --tail=200
+kubectl logs <pod> -n <ns> --previous  # if container restarted before delete
+
+# If a volume/finalizer is involved
+kubectl get pvc -A
+kubectl describe pvc <pvc> -n <ns>    # look for protection/finalizers and attach errors
