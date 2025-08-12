@@ -1,0 +1,15 @@
+# Quickly surface OOM victims
+kubectl get pods -A | egrep 'CrashLoopBackOff|Error'
+kubectl describe pod <pod> -n <ns>
+# Look for:
+#  - Last State: Terminated
+#    Reason: OOMKilled
+#    Exit Code: 137
+#  - Events: "Back-off restarting failed container"
+
+# Confirm container restarts increasing
+kubectl get pod <pod> -n <ns> -w
+
+# Optional: current/past logs (often truncated due to hard kill)
+kubectl logs <pod> -n <ns> [-c <container>]
+kubectl logs <pod> -n <ns> --previous [-c <container>]
