@@ -1,0 +1,20 @@
+# PVC and Pod state
+kubectl get pvc -A
+kubectl describe pvc <claim> -n <ns>
+# Look for: Status: Pending; Events from provisioner: "failed to provision volume", "no volume plugin matched", "insufficient capacity", "storageclass not found"
+
+kubectl get pods -n <ns> | egrep 'Pending|ContainerCreating'
+kubectl describe pod <pod> -n <ns>
+# Look for: "pod has unbound immediate PersistentVolumeClaims", or mount/attach errors in Events
+
+# Storage classes & default
+kubectl get storageclass
+kubectl describe storageclass <sc>
+
+# CSI health (controller/daemonset) — names vary by cloud/driver
+kubectl -n kube-system get pods -l app=csi-controller
+kubectl -n kube-system logs deploy/<csi-controller> --tail=200
+
+# Quotas that block PVCs
+kubectl get resourcequota -n <ns>
+kubectl describe resourcequota <rq> -n <ns>
