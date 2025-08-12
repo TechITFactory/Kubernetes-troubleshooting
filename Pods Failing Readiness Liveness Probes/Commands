@@ -1,0 +1,135 @@
+Recreate: aggressive liveness probe on a slow-start app
+server.py (simulate warm-up)
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+START = time.time()
+WARMUP_SECONDS = 25
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/healthz":
+            # Only healthy after warm-up
+            if time.time() - START >= WARMUP_SECONDS:
+                self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+            else:
+                self.send_response(500); self.end_headers(); self.wfile.write(b"warming")
+        elif self.path == "/readyz":
+            # Ready a bit after healthy
+            if time.time() - START >= WARMUP_SECONDS + 5:
+                self.send_response(200); self.end_headers(); self.wfile.write(b"ready")
+            else:
+                self.send_response(503); self.end_headers(); self.wfile.write(b"not ready")
+        else:
+            self.send_response(200); self.end_headers(); self.wfile.write(b"hello")
+
+httpd = HTTPServer(("", 8080), Handler)
+print("Starting server on :8080")
+httpd.serve_forever()
+
+Dockerfile:
+FROM python:3.11-slim
+WORKDIR /app
+COPY server.py .
+EXPOSE 8080
+CMD ["python","/app/server.py"]
+
+
+deployment-bad.yaml (liveness too aggressive; no startupProbe):
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: probe-demo } }
+  template:
+    metadata:
+      labels: { app: probe-demo }
+    spec:
+      containers:
+      - name: app
+        image: probe-demo:0.1
+        ports: [{ containerPort: 8080 }]
+        livenessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 1     # too strict
+        readinessProbe:
+          httpGet: { path: /readyz, port: 8080 }
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+Build the image:
+eval $(minikube docker-env)
+docker build -t probe-demo:0.1 .
+
+Deploy & Observe
+kubectl apply -f deployment-bad.yaml
+kubectl get pods -l app=probe-demo -w
+kubectl describe pod -l app=probe-demo | sed -n '/Events/,$p'
+# Expect: "Liveness probe failed" followed by "Killing container"; Restarts increase.
+kubectl logs deploy/probe-demo --all-containers
+kubectl logs pod/<pod-name> --previous   # see prior container logs after restarts
+---------------------------------------
+
+Resolve: add startupProbe and relax timing; ensure paths/ports are correct
+deployment-good.yaml:
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: probe-demo } }
+  template:
+    metadata:
+      labels: { app: probe-demo }
+    spec:
+      containers:
+      - name: app
+        image: probe-demo:0.2
+        ports: [{ containerPort: 8080 }]
+        # Gate liveness/readiness until app is healthy
+        startupProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 2
+          failureThreshold: 20   # ~40s budget
+        livenessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet: { path: /readyz, port: 8080 }
+          periodSeconds: 5
+          failureThreshold: 3
+        terminationGracePeriodSeconds: 30
+
+Rebuild & reload:
+# Update image tag to 0.2 (same Dockerfile/code is fine)
+docker build -t probe-demo:0.2 .
+
+# Minikube
+eval $(minikube docker-env) && docker build -t probe-demo:0.2 .
+
+Roll out the fix:
+kubectl set image deploy/probe-demo app=probe-demo:0.2
+kubectl rollout status deploy/probe-demo
+kubectl get pods -l app=probe-demo -w
+kubectl describe pod -l app=probe-demo | sed -n '/Events/,$p'
+kubectl get endpoints probe-demo -o wide   # if you created a Service (see below)
+
+(Optional) Add a Service and verify readiness → traffic
+apiVersion: v1
+kind: Service
+metadata:
+  name: probe-demo
+spec:
+  selector: { app: probe-demo }
+  ports: [{ port: 80, targetPort: 8080 }]
+
+kubectl apply -f service.yaml
+kubectl get endpoints probe-demo -w   # see Pod IP appear once Ready
