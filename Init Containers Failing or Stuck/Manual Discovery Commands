@@ -1,0 +1,17 @@
+# Quick surface of init-related states
+kubectl get pods -A | egrep 'Init:|ContainerCreating'
+
+# Inspect the pod's init containers & Events
+kubectl describe pod <pod> -n <ns>
+# Look for:
+#  - Init Containers: state, Last State, exit codes
+#  - Events: "Back-off restarting failed container", image pull errors, timeouts
+
+# View logs of the init container (not the app container)
+kubectl logs <pod> -n <ns> -c <init-container-name>
+
+# If it restarts quickly, see previous attempt
+kubectl logs <pod> -n <ns> -c <init-container-name> --previous
+
+# If the init container prepares shared volumes, verify volume wiring
+kubectl get pod <pod> -n <ns> -o yaml | yq '.spec.initContainers,.spec.containers,.spec.volumes'
