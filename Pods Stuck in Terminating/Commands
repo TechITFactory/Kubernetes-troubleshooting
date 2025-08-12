@@ -1,0 +1,148 @@
+Recreate: app that sleeps on SIGTERM → Pod stuck Terminating:
+server.py (HTTP server + slow SIGTERM handler):
+
+import signal, time, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+shutdown_requested = threading.Event()
+
+def handle_term(signum, frame):
+    print("SIGTERM received; pretending to drain for 120s")
+    shutdown_requested.set()
+    time.sleep(120)  # Simulate long, bad shutdown
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/healthz":
+            self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+        else:
+            self.send_response(200); self.end_headers(); self.wfile.write(b"hello")
+
+signal.signal(signal.SIGTERM, handle_term)
+HTTPServer(("", 8080), H).serve_forever()
+
+
+Dockerfile:
+FROM python:3.11-slim
+WORKDIR /app
+COPY server.py .
+EXPOSE 8080
+CMD ["python", "/app/server.py"]
+
+
+Build & load: Minikube
+eval $(minikube docker-env)
+docker build -t term-demo:0.1 .
+
+
+deployment-bad.yaml:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: term-demo
+  namespace: term-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: term-demo } }
+  template:
+    metadata: { labels: { app: term-demo } }
+    spec:
+      terminationGracePeriodSeconds: 30  # too short vs our 120s handler
+      containers:
+      - name: app
+        image: term-demo:0.1
+        ports: [{ name: http, containerPort: 8080 }]
+        # (bad) preStop sleeps, consuming the whole grace budget
+        lifecycle:
+          preStop:
+            exec: { command: ["sh","-c","echo preStop start; sleep 20; echo preStop done"] }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 5
+
+Deploy & Observe:
+kubectl create ns term-lab
+kubectl -n term-lab apply -f deployment-bad.yaml
+kubectl -n term-lab get pods -l app=term-demo -w
+
+# Delete the Pod to trigger termination
+POD=$(kubectl -n term-lab get pod -l app=term-demo -o jsonpath='{.items[0].metadata.name}')
+kubectl -n term-lab delete pod $POD
+
+# Watch it stuck in Terminating for ~30s (grace), then kubelet SIGKILLs it
+kubectl -n term-lab describe pod $POD | sed -n '/Events/,$p'
+
+You’ll see preStop ran while the grace timer was already ticking, then SIGTERM arrived, but the handler still slept → Terminating until grace expired
+
+
+Resolve: fast, coordinated shutdown (readiness drop → drain → quick exit):
+server_graceful.py (drain quickly on SIGTERM):
+
+import signal, threading, time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+ready = True
+def handle_term(signum, frame):
+    global ready
+    print("SIGTERM: start graceful shutdown")
+    ready = False            # stop being Ready ASAP
+    time.sleep(2)            # finish in-flight work quickly
+    raise SystemExit(0)
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/healthz":
+            code = 200 if ready else 503
+            self.send_response(code); self.end_headers(); self.wfile.write(b"ok" if ready else b"draining")
+        else:
+            self.send_response(200); self.end_headers(); self.wfile.write(b"hello")
+
+signal.signal(signal.SIGTERM, handle_term)
+HTTPServer(("", 8080), H).serve_forever()
+
+
+Rebuild image & load:
+# Update Dockerfile to COPY server_graceful.py and run it
+docker build -t term-demo:0.2 .
+# Minikube: eval $(minikube docker-env) && docker build -t term-demo:0.2 .
+# Kind: kind load docker-image term-demo:0.2
+
+
+deployment-good.yaml (short preStop that tells app to drain, more sensible grace):
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: term-demo
+  namespace: term-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: term-demo } }
+  template:
+    metadata: { labels: { app: term-demo } }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: app
+        image: term-demo:0.2
+        ports: [{ name: http, containerPort: 8080 }]
+        lifecycle:
+          preStop:
+            httpGet: { path: /healthz, port: 8080 }   # wake app; it will flip to 503 on SIGTERM
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 3
+
+
+Roll out & validate:
+kubectl -n term-lab apply -f deployment-good.yaml
+kubectl -n term-lab rollout status deploy/term-demo
+# Delete a pod and observe quick, clean termination
+POD=$(kubectl -n term-lab get pod -l app=term-demo -o jsonpath='{.items[0].metadata.name}')
+kubectl -n term-lab delete pod $POD
+kubectl -n term-lab get pod -l app=term-demo -w
+
+
+
+
+
+
