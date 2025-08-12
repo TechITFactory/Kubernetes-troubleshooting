@@ -1,0 +1,73 @@
+Enable the ingress controller (Minikube):
+minikube addons enable ingress
+kubectl -n ingress-nginx get pods -w
+
+Deploy an echo app and Service:
+kubectl create ns edge-lab
+kubectl -n edge-lab create deploy echo --image=ealen/echo-server:0.6.0
+kubectl -n edge-lab expose deploy echo --port=80 --target-port=80
+kubectl -n edge-lab get endpoints echo -o wide   # should list Pod IP(s)
+
+
+Create a broken Ingress (wrong host & wrong service port):
+# bad-ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echo
+  namespace: edge-lab
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: app.example.local         # we'll curl this host, but service is miswired
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: echo
+            port:
+              number: 8080          # <— WRONG (service exposes 80)
+
+kubectl apply -f bad-ingress.yaml
+kubectl -n edge-lab describe ingress echo | sed -n '/Rules/,$p'
+
+
+Test with correct Host header (but wrong backend port):
+# Get the controller IP (may need `minikube ip` + NodePort if no LB IP)
+IP=$(minikube ip)
+curl -s -H 'Host: app.example.local' http://$IP/ -i | head
+# Expect 502/503 due to no endpoints on port 8080
+kubectl -n ingress-nginx logs deploy/ingress-nginx-controller | tail
+
+
+Fix the Service port (and verify):
+
+kubectl -n edge-lab patch ingress echo -p '{
+  "spec":{"rules":[{"host":"app.example.local","http":{"paths":[{"path":"/","pathType":"Prefix","backend":{"service":{"name":"echo","port":{"number":80}}}}]}}]}
+}'
+curl -s -H 'Host: app.example.local' http://$IP/ | head -n1
+# Should return JSON echo output
+
+
+Break host matching → 404 from default backend:
+curl -s -H 'Host: wrong.local' http://$IP/ -i | head
+# Expect: 404 Not Found (no matching host rule)
+
+
+
+Add TLS with a self-signed Secret and test SNI:
+# Create a self-signed cert for app.example.local (dev-only)
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -subj "/CN=app.example.local" \
+  -keyout /tmp/tls.key -out /tmp/tls.crt
+kubectl -n edge-lab create secret tls echo-tls --key=/tmp/tls.key --cert=/tmp/tls.crt
+
+# Patch Ingress to use TLS
+kubectl -n edge-lab patch ingress echo --type='json' -p='[
+ {"op":"add","path":"/spec/tls","value":[{"hosts":["app.example.local"],"secretName":"echo-tls"}]}
+]'
+# Test with SNI and Host (use --resolve to map host to IP)
+curl -s --resolve app.example.local:443:'{'"$IP"'}' https://app.example.local/ -k | head -n1
+
