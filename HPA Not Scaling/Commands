@@ -1,0 +1,166 @@
+App that can burn CPU:
+cpu_app.py
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import time, math, urllib.parse as u
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        qs = u.parse_qs(u.urlparse(self.path).query)
+        burn = int(qs.get("burn_ms",[0])[0])
+        end = time.time() + burn/1000.0
+        x = 0.0
+        while time.time() < end:
+            x += math.sqrt(12345.678)  # cpu spin
+        self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+
+HTTPServer(("", 8080), H).serve_forever()
+
+
+Dockerfile:
+FROM python:3.11-slim
+WORKDIR /app
+COPY cpu_app.py .
+EXPOSE 8080
+CMD ["python","/app/cpu_app.py"]
+
+
+Build & load: Minikube
+eval $(minikube docker-env)
+docker build -t hpa-demo:0.1 .
+
+
+Deploy with bad requests (too high) + Service:
+deploy-bad.yaml:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hpa-demo
+  namespace: hpa-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: hpa-demo } }
+  template:
+    metadata: { labels: { app: hpa-demo } }
+    spec:
+      containers:
+      - name: app
+        image: hpa-demo:0.1
+        ports: [{ name: http, containerPort: 8080 }]
+        resources:
+          requests:
+            cpu: "1000m"      # INTENTIONALLY HUGE
+            memory: "128Mi"
+          limits:
+            cpu: "1000m"
+            memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hpa-demo
+  namespace: hpa-lab
+spec:
+  selector: { app: hpa-demo }
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+
+
+kubectl create ns hpa-lab
+kubectl apply -f deploy-bad.yaml
+kubectl -n hpa-lab get pods -w
+
+
+Create an HPA targeting 50% CPU utilization:
+kubectl -n hpa-lab autoscale deploy hpa-demo --cpu-percent=50 --min=1 --max=10
+kubectl -n hpa-lab get hpa hpa-demo -w
+
+
+Generate load that should scale—but won’t (because requests are huge):
+Create a temporary load pod and hit / with CPU burn:
+kubectl -n hpa-lab run loader --image=busybox:1.36 --restart=Never --command -- sleep 3600
+# fire a small load loop (burn 300ms per request)
+kubectl -n hpa-lab exec loader -- sh -c 'while true; do wget -qO- "http://hpa-demo/burn?burn_ms=300" >/dev/null; done' &
+
+
+Observe HPA:
+kubectl -n hpa-lab describe hpa hpa-demo | sed -n '/Targets/,$p'
+# Expect CPU% stays low (~10–30%) because request=1000m; HPA won’t scale.
+kubectl top pods -n hpa-lab
+
+
+Fix: right-size requests and add stabilization behavior:
+deploy-good.yaml:
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hpa-demo
+  namespace: hpa-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: hpa-demo } }
+  template:
+    metadata: { labels: { app: hpa-demo } }
+    spec:
+      containers:
+      - name: app
+        image: hpa-demo:0.1
+        ports: [{ name: http, containerPort: 8080 }]
+        resources:
+          requests:
+            cpu: "150m"            # realistic baseline
+            memory: "128Mi"
+          limits:
+            cpu: "500m"            # headroom to avoid throttling
+            memory: "256Mi"
+
+Apply and watch:
+kubectl -n hpa-lab apply -f deploy-good.yaml
+sleep 30
+kubectl -n hpa-lab describe hpa hpa-demo | sed -n '/Targets/,$p'
+kubectl -n hpa-lab get deploy hpa-demo -w   # replicas should climb as CPU% > 50
+----------------------
+
+Optional: add HPA behavior to reduce flapping (requires autoscaling/v2):
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-demo
+  namespace: hpa-lab
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hpa-demo
+  minReplicas: 1
+  maxReplicas: 10
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+
+
+kubectl -n hpa-lab apply -f hpa.yaml
+kubectl -n hpa-lab describe hpa hpa-demo
+
+Cleanup:
+kubectl -n hpa-lab delete pod loader --ignore-not-found
+kubectl delete ns hpa-lab
