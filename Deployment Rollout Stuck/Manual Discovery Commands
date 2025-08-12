@@ -1,0 +1,19 @@
+# Watch rollout
+kubectl -n <ns> rollout status deploy/<name> --watch
+
+# Describe Deployment for conditions/events
+kubectl -n <ns> describe deploy <name>
+# Look for:
+#  Conditions:
+#   - Type: Progressing   Status: False   Reason: ProgressDeadlineExceeded
+#   - Type: Available     Status: False/True
+#  Events: probe failures, image pull errors, admission denials
+
+# Check ReplicaSets and Pods created by this Deployment
+kubectl -n <ns> get rs -l app=<label> -o wide
+kubectl -n <ns> get pods -l app=<label> -o wide
+
+# Drill into a failing Pod
+kubectl -n <ns> describe pod <pod>
+kubectl -n <ns> logs <pod> [-c <container>]
+kubectl -n <ns> logs <pod> --previous
