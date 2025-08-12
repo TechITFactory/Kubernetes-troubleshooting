@@ -1,0 +1,55 @@
+kubectl apply -f bad-image-pod.yaml
+kubectl get pod bad-image -w
+kubectl describe pod bad-image | sed -n '/Events/,$p'
+# Expect: ErrImagePull followed by ImagePullBackOff with "not found" messages.
+
+
+  Resolve: correct the image
+Option A — patch in place:
+kubectl patch pod bad-image -p '{"spec":{"containers":[{"name":"web","image":"nginx:1.25-alpine"}]}}'
+
+Option B — edit YAML and re-apply:
+# bad-image-pod.yaml (fixed)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-image
+spec:
+  containers:
+  - name: web
+    image: nginx:1.25-alpine
+    imagePullPolicy: IfNotPresent
+
+kubectl delete pod bad-image --wait=true
+kubectl apply -f bad-image-pod.yaml
+kubectl get pod bad-image -w
+kubectl logs -f bad-image   # now returns Nginx access logs
+
+ Private Docker Hub Image Example:
+Step 1 — Push a private image to Docker Hub:
+docker login
+docker pull nginx:1.25-alpine
+docker tag nginx:1.25-alpine <dockerhub-username>/private-nginx:1.0
+docker push <dockerhub-username>/private-nginx:1.0
+# Mark this repo as "Private" in Docker Hub settings
+
+
+Step 2 — Try pulling without creds
+kubectl run dockerhub-private \
+  --image=docker.io/<dockerhub-username>/private-nginx:1.0 \
+  --restart=Never
+  
+Expected: ErrImagePull / ImagePullBackOff with "unauthorized: authentication required"
+
+Step 3 — Create a pull secret & retry
+kubectl create secret docker-registry dockerhub-creds \
+  --docker-server=docker.io \
+  --docker-username=<dockerhub-username> \
+  --docker-password=<dockerhub-password> \
+  --docker-email=<email>
+
+kubectl delete pod dockerhub-private --ignore-not-found
+kubectl run dockerhub-private \
+  --image=docker.io/<dockerhub-username>/private-nginx:1.0 \
+  --image-pull-secrets=dockerhub-creds \
+  --restart=Never
