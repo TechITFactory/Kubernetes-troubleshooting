@@ -1,0 +1,49 @@
+Recreate: block DNS, observe failures:
+# Create a sandbox namespace
+kubectl create ns dns-lab
+
+# Simple test pod
+kubectl -n dns-lab run tester --image=busybox:1.36 --restart=Never --command -- sleep 3600
+
+# Apply a default-deny egress policy
+cat <<'YAML' | kubectl -n dns-lab apply -f -
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny-egress }
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+YAML
+
+# DNS lookups now fail
+kubectl -n dns-lab exec tester -- nslookup kubernetes.default || true
+kubectl -n dns-lab exec tester -- nslookup google.com || true
+
+
+Resolve: allow DNS to CoreDNS:
+# Allow UDP+TCP 53 to kube-dns
+cat <<'YAML' | kubectl -n dns-lab apply -f -
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns }
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - { protocol: UDP, port: 53 }
+    - { protocol: TCP, port: 53 }
+YAML
+
+# Re-test (should succeed)
+kubectl -n dns-lab exec tester -- nslookup kubernetes.default
+kubectl -n dns-lab exec tester -- nslookup google.com
+
+  
