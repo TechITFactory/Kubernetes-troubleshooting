@@ -1,0 +1,15 @@
+# What policies exist in and affect the namespace?
+kubectl -n <ns> get networkpolicy
+kubectl -n <ns> describe networkpolicy <name>      # Look at podSelector, policyTypes, ingress/egress
+
+# Which pods are selected by the policy?
+kubectl -n <ns> get pod -l <labels> -o wide
+
+# Quick connectivity test from a throwaway pod
+kubectl -n <ns> run tester --image=busybox:1.36 --restart=Never --command -- sleep 3600
+kubectl -n <ns> exec tester -- wget -qO- http://<svc-name>:<port> || echo FAIL
+kubectl -n <ns> exec tester -- nc -vz <pod-ip> <port> || echo FAIL
+
+# If egress might be blocked (DNS/external)
+kubectl -n <ns> exec tester -- nslookup kubernetes.default || true
+kubectl -n <ns> exec tester -- wget -S --spider https://example.com || true
