@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crash-demo
+  labels: { app: crash-demo }
+spec:
+  containers:
+  - name: app
+    image: crash-demo:0.1
+    imagePullPolicy: IfNotPresent
+    # CMD is in the image; leaving command/args empty is fine
+  restartPolicy: Always
