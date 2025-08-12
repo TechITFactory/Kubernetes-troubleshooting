@@ -1,0 +1,173 @@
+Recreate: failing migration in an init container → Init:CrashLoopBackOff:
+
+init-fail.yaml:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-fail-demo
+  namespace: init-lab
+spec:
+  restartPolicy: Always
+  volumes:
+  - name: work
+    emptyDir: {}
+  initContainers:
+  - name: migrate
+    image: busybox:1.36
+    command: ["sh","-c","echo 'running migration'; exit 1"]   # <— fails on purpose
+    volumeMounts:
+    - name: work
+      mountPath: /work
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","echo 'app starting'; ls -l /work; sleep 3600"]
+    volumeMounts:
+    - name: work
+      mountPath: /work
+
+Deploy & Observe:
+kubectl create ns init-lab
+kubectl -n init-lab apply -f init-fail.yaml
+kubectl -n init-lab get pod init-fail-demo -w
+kubectl -n init-lab describe pod init-fail-demo | sed -n '/Init Containers:/,/Containers:/p'
+kubectl -n init-lab logs init-fail-demo -c migrate --previous
+# Expect: STATUS: Init:CrashLoopBackOff, Events show non-zero exit
+
+
+Resolve: make the init succeed (or make app robust):
+init-fix.yaml:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-fail-demo
+  namespace: init-lab
+spec:
+  restartPolicy: Always
+  volumes:
+  - name: work
+    emptyDir: {}
+  initContainers:
+  - name: migrate
+    image: busybox:1.36
+    command: ["sh","-c","echo 'running migration'; echo ready > /work/flag; exit 0"]
+    volumeMounts:
+    - name: work
+      mountPath: /work
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","echo 'app starting'; cat /work/flag; sleep 3600"]
+    volumeMounts:
+    - name: work
+      mountPath: /work
+
+
+kubectl -n init-lab apply -f init-fix.yaml
+kubectl -n init-lab get pod init-fail-demo -w   # should go to Running
+kubectl -n init-lab logs init-fail-demo -c app | head
+
+
+Recreate: mount name mismatch (init writes to a different volume):
+init-bad-mount.yaml:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-bad-mount
+  namespace: init-lab
+spec:
+  volumes:
+  - name: work-a
+    emptyDir: {}
+  - name: work-b
+    emptyDir: {}
+  initContainers:
+  - name: seed
+    image: busybox:1.36
+    command: ["sh","-c","echo seeded > /work/flag; sleep 1"]
+    volumeMounts:
+    - { name: work-a, mountPath: /work }   # writes to work-a
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","cat /work/flag || echo 'FLAG MISSING'; sleep 3600"]
+    volumeMounts:
+    - { name: work-b, mountPath: /work }   # reads from work-b (wrong)
+
+Deploy & Observe:
+kubectl -n init-lab apply -f init-bad-mount.yaml
+kubectl -n init-lab logs init-bad-mount -c app --tail=5   # "FLAG MISSING"
+
+
+Resolve: make both containers mount the same volume name.:
+kubectl -n init-lab patch pod init-bad-mount -p '{
+  "spec":{"containers":[{"name":"app","volumeMounts":[{"name":"work-a","mountPath":"/work"}]}]}
+}'
+
+
+
+Recreate: init needs egress/DNS but NetworkPolicy blocks it:
+deny-egress.yaml (namespace default-deny):
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: init-lab
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+
+
+pod that curls an external URL in init:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: init-curl
+  namespace: init-lab
+spec:
+  initContainers:
+  - name: fetch
+    image: curlimages/curl:8.8.0
+    args: ["-sS","https://example.com","-o","/work/index.html"]
+    volumeMounts: [{ name: work, mountPath: /work }]
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","ls -l /work; sleep 3600"]
+    volumeMounts: [{ name: work, mountPath: /work }]
+  volumes:
+  - name: work
+    emptyDir: {}
+
+
+kubectl -n init-lab apply -f deny-egress.yaml
+kubectl -n init-lab apply -f init-curl.yaml
+kubectl -n init-lab describe pod init-curl | sed -n '/Init Containers:/,/Containers:/p'
+# Expect fetch init to hang/fail due to egress deny
+
+
+Resolve: allow egress to DNS and Internet (or specific CIDRs).:
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: init-lab
+spec:
+  podSelector: {}
+  policyTypes: ["Egress"]
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - { protocol: UDP, port: 53 }
+    - { protocol: TCP, port: 53 }
+  - to:
+    - ipBlock: { cidr: 0.0.0.0/0 }   # tighten in real clusters
+    ports:
+    - { protocol: TCP, port: 443 }
