@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dockerhub-private
+spec:
+  imagePullSecrets:
+  - name: dockerhub-creds
+  containers:
+  - name: nginx
+    image: docker.io/techitfactory/private-nginx:1.0
+    imagePullPolicy: Always
+
