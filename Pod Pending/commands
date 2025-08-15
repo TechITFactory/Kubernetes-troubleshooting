@@ -13,7 +13,7 @@ spec:
     resources:
       requests:
         cpu: "100m"
-        memory: "32Gi"     # Intentionally larger than a single-node lab
+        memory: "32Gi"     # Intentionally larger than a single-node
       limits:
         memory: "32Gi"
 
