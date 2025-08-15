@@ -1,135 +1,259 @@
-Recreate: aggressive liveness probe on a slow-start app
-server.py (simulate warm-up)
-import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-START = time.time()
-WARMUP_SECONDS = 25
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/healthz":
-            # Only healthy after warm-up
-            if time.time() - START >= WARMUP_SECONDS:
-                self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
-            else:
-                self.send_response(500); self.end_headers(); self.wfile.write(b"warming")
-        elif self.path == "/readyz":
-            # Ready a bit after healthy
-            if time.time() - START >= WARMUP_SECONDS + 5:
-                self.send_response(200); self.end_headers(); self.wfile.write(b"ready")
-            else:
-                self.send_response(503); self.end_headers(); self.wfile.write(b"not ready")
-        else:
-            self.send_response(200); self.end_headers(); self.wfile.write(b"hello")
-
-httpd = HTTPServer(("", 8080), Handler)
-print("Starting server on :8080")
-httpd.serve_forever()
-
-Dockerfile:
-FROM python:3.11-slim
-WORKDIR /app
-COPY server.py .
-EXPOSE 8080
-CMD ["python","/app/server.py"]
+package.json
+{
+  "name": "failing-health-app",
+  "version": "1.0.0",
+  "description": "Demo app for Kubernetes health check troubleshooting",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "author": "Kubernetes Training",
+  "license": "MIT"
+}
 
 
-deployment-bad.yaml (liveness too aggressive; no startupProbe):
+ server.js (Failing Version)
+const express = require('express');
+const app = express();
+
+let healthy = false;
+let startupTime = Date.now();
+
+// Simulate slow startup - takes 60 seconds to become healthy
+setTimeout(() => {
+  healthy = true;
+  console.log('Application is now healthy');
+}, 60000);
+
+app.get('/', (req, res) => {
+  res.send(`Hello World! App running for ${Math.floor((Date.now() - startupTime) / 1000)} seconds`);
+});
+
+app.get('/health', (req, res) => {
+  console.log(`Health check called. Healthy: ${healthy}`);
+  if (healthy) {
+    res.status(200).json({
+      status: 'healthy',
+      uptime: Math.floor((Date.now() - startupTime) / 1000),
+      timestamp: new Date().toISOString()
+    });
+  } else {
+    res.status(503).json({
+      status: 'not ready',
+      uptime: Math.floor((Date.now() - startupTime) / 1000),
+      timestamp: new Date().toISOString(),
+      message: 'Still initializing...'
+    });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server starting on port ${PORT}. Will be healthy in 60 seconds...`);
+});
+
+
+Complete Docker Build Commands
+mkdir k8s-health-demo
+cd k8s-health-demo
+
+# Create the files (package.json, server.js from above)
+# docker build -t failing-health-app:v1 .
+minikube image load failing-health-app:v1
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: probe-demo
+  name: failing-health-demo
 spec:
-  replicas: 1
-  selector: { matchLabels: { app: probe-demo } }
+  replicas: 2
+  selector:
+    matchLabels:
+      app: failing-health-demo
   template:
     metadata:
-      labels: { app: probe-demo }
+      labels:
+        app: failing-health-demo
     spec:
       containers:
       - name: app
-        image: probe-demo:0.1
-        ports: [{ containerPort: 8080 }]
-        livenessProbe:
-          httpGet: { path: /healthz, port: 8080 }
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          failureThreshold: 1     # too strict
+        image: failing-health-app:v1
+        imagePullPolicy: Never  # For local images
+        ports:
+        - containerPort: 3000
         readinessProbe:
-          httpGet: { path: /readyz, port: 8080 }
-          initialDelaySeconds: 5
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5   # TOO AGGRESSIVE - app needs 60s to be healthy
           periodSeconds: 5
-
-Build the image:
-eval $(minikube docker-env)
-docker build -t probe-demo:0.1 .
-
-Deploy & Observe
-kubectl apply -f deployment-bad.yaml
-kubectl get pods -l app=probe-demo -w
-kubectl describe pod -l app=probe-demo | sed -n '/Events/,$p'
-# Expect: "Liveness probe failed" followed by "Killing container"; Restarts increase.
-kubectl logs deploy/probe-demo --all-containers
-kubectl logs pod/<pod-name> --previous   # see prior container logs after restarts
----------------------------------------
-
-Resolve: add startupProbe and relax timing; ensure paths/ports are correct
-deployment-good.yaml:
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: probe-demo
-spec:
-  replicas: 1
-  selector: { matchLabels: { app: probe-demo } }
-  template:
-    metadata:
-      labels: { app: probe-demo }
-    spec:
-      containers:
-      - name: app
-        image: probe-demo:0.2
-        ports: [{ containerPort: 8080 }]
-        # Gate liveness/readiness until app is healthy
-        startupProbe:
-          httpGet: { path: /healthz, port: 8080 }
-          periodSeconds: 2
-          failureThreshold: 20   # ~40s budget
+          timeoutSeconds: 3
+          failureThreshold: 2      # TOO STRICT - fails after only 2 attempts
+          successThreshold: 1
         livenessProbe:
-          httpGet: { path: /healthz, port: 8080 }
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10  # TOO AGGRESSIVE - will start failing immediately
           periodSeconds: 10
-          failureThreshold: 3
-        readinessProbe:
-          httpGet: { path: /readyz, port: 8080 }
-          periodSeconds: 5
-          failureThreshold: 3
-        terminationGracePeriodSeconds: 30
-
-Rebuild & reload:
-# Update image tag to 0.2 (same Dockerfile/code is fine)
-docker build -t probe-demo:0.2 .
-
-# Minikube
-eval $(minikube docker-env) && docker build -t probe-demo:0.2 .
-
-Roll out the fix:
-kubectl set image deploy/probe-demo app=probe-demo:0.2
-kubectl rollout status deploy/probe-demo
-kubectl get pods -l app=probe-demo -w
-kubectl describe pod -l app=probe-demo | sed -n '/Events/,$p'
-kubectl get endpoints probe-demo -o wide   # if you created a Service (see below)
-
-(Optional) Add a Service and verify readiness → traffic
+          timeoutSeconds: 3
+          failureThreshold: 3      # Will cause container restarts
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
 apiVersion: v1
 kind: Service
 metadata:
-  name: probe-demo
+  name: failing-health-service
 spec:
-  selector: { app: probe-demo }
-  ports: [{ port: 80, targetPort: 8080 }]
+  selector:
+    app: failing-health-demo
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: ClusterIP
 
-kubectl apply -f service.yaml
-kubectl get endpoints probe-demo -w   # see Pod IP appear once Ready
+---
+Observe the Problem:
+# See the unhealthy pods
+kubectl get pods -l app=failing-health-demo
+# READY column shows 0/1 for all pods
+
+# Check service endpoints (should be empty)
+kubectl get endpoints failing-health-service
+# No endpoints because no pods are ready
+
+# Watch logs to see health check failures
+kubectl logs -l app=failing-health-demo -f
+
+--------------------------------
+server-fixed.js (Working Version)
+const express = require('express');
+const app = express();
+
+let healthy = true; // Start healthy immediately
+let ready = false;
+let startupTime = Date.now();
+
+// Simulate faster startup - ready in 10 seconds
+setTimeout(() => {
+  ready = true;
+  console.log('Application is now ready to serve traffic');
+}, 10000);
+
+app.get('/', (req, res) => {
+  res.send(`Hello World! App running for ${Math.floor((Date.now() - startupTime) / 1000)} seconds`);
+});
+
+// Liveness probe - basic health check
+app.get('/alive', (req, res) => {
+  console.log('Liveness check called');
+  if (healthy) {
+    res.status(200).json({
+      status: 'alive',
+      uptime: Math.floor((Date.now() - startupTime) / 1000),
+      timestamp: new Date().toISOString()
+    });
+  } else {
+    res.status(503).json({
+      status: 'dead',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Readiness probe - comprehensive readiness check
+app.get('/ready', (req, res) => {
+  console.log(`Readiness check called. Ready: ${ready}`);
+  if (ready && healthy) {
+    res.status(200).json({
+      status: 'ready',
+      uptime: Math.floor((Date.now() - startupTime) / 1000),
+      timestamp: new Date().toISOString()
+    });
+  } else {
+    res.status(503).json({
+      status: 'not ready',
+      uptime: Math.floor((Date.now() - startupTime) / 1000),
+      timestamp: new Date().toISOString(),
+      message: ready ? 'Healthy but not ready' : 'Still initializing...'
+    });
+  }
+});
+
+// Legacy health endpoint for backward compatibility
+app.get('/health', (req, res) => {
+  res.redirect('/ready');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server starting on port ${PORT}. Will be ready in 10 seconds...`);
+});
+
+------------------------------------------------------
+# fixed-probe-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-demo-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: health-demo
+  template:
+    metadata:
+      labels:
+        app: health-demo
+    spec:
+      containers:
+      - name: app
+        image: failing-health-app:v2
+        imagePullPolicy: Never  # For local images
+        ports:
+        - containerPort: 3000
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 3000
+          initialDelaySeconds: 15  # Wait for app initialization
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /alive
+            port: 3000
+          initialDelaySeconds: 20   # Start after readiness probe
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 5       # More lenient for liveness
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-demo-service
+spec:
+  selector:
+    app: health-demo
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: ClusterIP
