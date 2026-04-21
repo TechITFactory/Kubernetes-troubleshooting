@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-selector
+spec:
+  nodeSelector: { nodepool: highmem }   # no node has this label yet
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","sleep 3600"]
