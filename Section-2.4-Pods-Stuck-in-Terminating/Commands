@@ -8,12 +8,20 @@ kubectl -n term-lab apply -f deployment-bad.yaml
 kubectl -n term-lab get pods -l app=term-demo -w
 
 # 3. Delete the Pod to trigger termination
+# Use --wait=false so the pod stays visible while shutting down; otherwise delete blocks ~30s
+# and describe/events below may 404 after the object is gone.
 POD=$(kubectl -n term-lab get pod -l app=term-demo -o jsonpath='{.items[0].metadata.name}')
-kubectl -n term-lab delete pod $POD
+kubectl -n term-lab delete pod $POD --wait=false
 
-# 4. Watch it stuck in Terminating for ~30s (grace), then kubelet SIGKILLs it
+# 4. “Stuck” here = stays in deletion for the full grace period (~30s), not forever.
+# STATUS "Terminating" is what kubectl prints when metadata.deletionTimestamp is set;
+# Pod .status.phase stays "Running" until containers exit (there is no Terminating phase).
 kubectl -n term-lab describe pod $POD | sed -n '/Events/,$p'
-# You’ll see preStop ran while the grace timer was already ticking, then SIGTERM arrived, but the handler still slept → Terminating until grace expired
+# You’ll see preStop ran while the grace timer was already ticking, then SIGTERM arrived, but the handler still slept → shutdown lasts until grace expires (then SIGKILL).
+
+# Optional: watch STATUS go Running → Terminating → gone (blocks; Ctrl+C when done)
+kubectl -n term-lab get pods -l app=term-demo -w
+# Or open a second terminal: same watch while you delete here, to see Terminating for ~30s.
 
 # 5. Build and load the gracefully terminating image
 # Note: Since the Dockerfile expects server.py, we copy server_graceful.py to it
@@ -28,5 +36,28 @@ kubectl -n term-lab rollout status deploy/term-demo
 
 # 7. Delete a pod and observe quick, clean termination
 POD=$(kubectl -n term-lab get pod -l app=term-demo -o jsonpath='{.items[0].metadata.name}')
-kubectl -n term-lab delete pod $POD
+kubectl -n term-lab delete pod $POD --wait=false
 kubectl -n term-lab get pod -l app=term-demo -w
+
+# ---------------------------------------------------------------------------
+# 8. Fully stuck Terminating (finalizers) — delete never completes until cleared
+# ---------------------------------------------------------------------------
+# Requires namespace term-lab from step 2 (or: kubectl create ns term-lab).
+kubectl -n term-lab apply -f pod-stuck-finalizer.yaml
+kubectl -n term-lab wait --for=condition=Ready pod/stuck-finalizer-demo --timeout=120s
+
+# Request delete; pod remains with STATUS=Terminating (object blocked in etcd).
+kubectl -n term-lab delete pod stuck-finalizer-demo --wait=false
+kubectl -n term-lab get pod stuck-finalizer-demo -o wide
+# Proof it is "stuck": Pod object still exists, non-empty finalizers, deletionTimestamp set.
+# (kubectl prints Terminating in STATUS; .status.phase may stay Running or become Failed — there is no "Terminating" phase.)
+kubectl -n term-lab get pod stuck-finalizer-demo -o jsonpath='finalizers={.metadata.finalizers}{"\n"}deletionTimestamp={.metadata.deletionTimestamp}{"\n"}'
+# Optional: wait 20–30s and run get again — it stays until you patch finalizers (verified on v1.34).
+# kubectl -n term-lab get pod stuck-finalizer-demo
+
+# Clear the blocker (same idea as fixing orphaned / stuck controllers in prod):
+kubectl -n term-lab patch pod stuck-finalizer-demo --type=merge -p '{"metadata":{"finalizers":[]}}'
+# API can delete the Pod object once finalizers are empty; you may briefly still see
+# Terminating while the kubelet tears down the sandbox (faster with terminationGracePeriodSeconds: 0 in the yaml).
+kubectl -n term-lab wait --for=delete pod/stuck-finalizer-demo --timeout=120s
+kubectl -n term-lab get pod stuck-finalizer-demo 2>&1

@@ -12,3 +12,7 @@ kubectl logs <pod> -n <ns> --previous  # if container restarted before delete
 # If a volume/finalizer is involved
 kubectl get pvc -A
 kubectl describe pvc <pvc> -n <ns>    # look for protection/finalizers and attach errors
+kubectl get pod <pod> -n <ns> -o jsonpath='{.metadata.finalizers}{"\n"}{.metadata.deletionTimestamp}{"\n"}'
+
+# Stuck on custom/unknown finalizers — clear only when safe (no controller will finish cleanup):
+# kubectl patch pod <pod> -n <ns> --type=merge -p '{"metadata":{"finalizers":[]}}'
