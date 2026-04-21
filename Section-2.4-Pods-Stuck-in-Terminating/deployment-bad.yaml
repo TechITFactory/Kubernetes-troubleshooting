@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: term-demo
+  namespace: term-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: term-demo } }
+  template:
+    metadata: { labels: { app: term-demo } }
+    spec:
+      terminationGracePeriodSeconds: 30  # too short vs our 120s handler
+      containers:
+      - name: app
+        image: term-demo:0.1
+        ports: [{ name: http, containerPort: 8080 }]
+        # (bad) preStop sleeps, consuming the whole grace budget
+        lifecycle:
+          preStop:
+            exec: { command: ["sh","-c","echo preStop start; sleep 20; echo preStop done"] }
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 5

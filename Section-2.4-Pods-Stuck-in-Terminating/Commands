@@ -1,0 +1,32 @@
+# 1. Build & load the initial bad image
+eval $(minikube docker-env)
+docker build -t term-demo:0.1 .
+
+# 2. Deploy & Observe:
+kubectl create ns term-lab
+kubectl -n term-lab apply -f deployment-bad.yaml
+kubectl -n term-lab get pods -l app=term-demo -w
+
+# 3. Delete the Pod to trigger termination
+POD=$(kubectl -n term-lab get pod -l app=term-demo -o jsonpath='{.items[0].metadata.name}')
+kubectl -n term-lab delete pod $POD
+
+# 4. Watch it stuck in Terminating for ~30s (grace), then kubelet SIGKILLs it
+kubectl -n term-lab describe pod $POD | sed -n '/Events/,$p'
+# You’ll see preStop ran while the grace timer was already ticking, then SIGTERM arrived, but the handler still slept → Terminating until grace expired
+
+# 5. Build and load the gracefully terminating image
+# Note: Since the Dockerfile expects server.py, we copy server_graceful.py to it
+cp server_graceful.py server.py
+docker build -t term-demo:0.2 .
+# Minikube: eval $(minikube docker-env) && docker build -t term-demo:0.2 .
+# Kind: kind load docker-image term-demo:0.2
+
+# 6. Roll out & validate the good deployment
+kubectl -n term-lab apply -f deployment-good.yaml
+kubectl -n term-lab rollout status deploy/term-demo
+
+# 7. Delete a pod and observe quick, clean termination
+POD=$(kubectl -n term-lab get pod -l app=term-demo -o jsonpath='{.items[0].metadata.name}')
+kubectl -n term-lab delete pod $POD
+kubectl -n term-lab get pod -l app=term-demo -w

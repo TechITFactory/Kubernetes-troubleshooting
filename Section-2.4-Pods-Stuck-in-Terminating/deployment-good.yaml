@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: term-demo
+  namespace: term-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: term-demo } }
+  template:
+    metadata: { labels: { app: term-demo } }
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: app
+        image: term-demo:0.2
+        ports: [{ name: http, containerPort: 8080 }]
+        lifecycle:
+          preStop:
+            httpGet: { path: /healthz, port: 8080 }   # wake app; it will flip to 503 on SIGTERM
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 3
