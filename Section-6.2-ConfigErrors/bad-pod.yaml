@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-error-demo
+  labels: { app: config-error-demo }
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","env | sort; sleep 3600"]
+    envFrom:
+    - configMapRef: { name: app-config }         # does not exist yet
+    - secretRef:    { name: db-credentials }     # does not exist yet
+    volumeMounts:
+    - name: app-config-vol
+      mountPath: /etc/app
+  volumes:
+  - name: app-config-vol
+    configMap:
+      name: app-config

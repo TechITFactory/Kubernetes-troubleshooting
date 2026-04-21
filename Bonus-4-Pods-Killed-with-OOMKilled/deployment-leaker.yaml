@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oomkill-demo
+  namespace: oomkill-lab
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: oomkill-demo } }
+  template:
+    metadata: { labels: { app: oomkill-demo } }
+    spec:
+      containers:
+      - name: leaker
+        image: busybox:1.36
+        command: ["sh","-c","i=0; while true; do dd if=/dev/zero bs=10M count=1 >> /tmp/blob 2>/dev/null; i=$((i+1)); echo \"Allocated ${i}0 MiB\"; sleep 0.5; done"]
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            memory: "128Mi"    # container will be OOMKilled when it exceeds this

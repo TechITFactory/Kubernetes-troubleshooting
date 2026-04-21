@@ -1,0 +1,55 @@
+# ---- Setup: Create namespace with Quota + LimitRange ----
+
+# 1. Create the namespace
+kubectl create ns quota-lab
+
+# 2. Apply ResourceQuota and LimitRange
+kubectl apply -f resourcequota.yaml
+kubectl apply -f limitrange.yaml
+
+# 3. Verify
+kubectl -n quota-lab describe quota
+kubectl -n quota-lab describe limitrange
+
+# ---- Scenario 1: Quota Exceeded ----
+
+# 4. Deploy too many replicas exceeding CPU quota
+kubectl -n quota-lab apply -f deployment-exceed.yaml
+
+# 5. Observe - not all replicas will schedule
+kubectl -n quota-lab get deploy,rs,pods
+kubectl -n quota-lab describe rs  # Look for "exceeded quota" in Events
+kubectl -n quota-lab describe quota compute-quota
+
+# 6. Fix - reduce per-container requests
+kubectl -n quota-lab apply -f deployment-fixed.yaml
+kubectl -n quota-lab get pods
+kubectl -n quota-lab describe quota compute-quota
+
+# ---- Scenario 2: LimitRange Violation ----
+
+# 7. Try to create a Pod exceeding LimitRange max
+kubectl -n quota-lab run big-pod --image=nginx \
+  --overrides='{"spec":{"containers":[{"name":"nginx","image":"nginx","resources":{"requests":{"cpu":"2","memory":"2Gi"},"limits":{"cpu":"2","memory":"2Gi"}}}]}}'
+# Expected error: maximum cpu/memory constraint violated
+
+# 8. Fix: request within bounds
+kubectl -n quota-lab run ok-pod --image=nginx \
+  --overrides='{"spec":{"containers":[{"name":"nginx","image":"nginx","resources":{"requests":{"cpu":"200m","memory":"128Mi"},"limits":{"cpu":"500m","memory":"256Mi"}}}]}}'
+
+# ---- Discovery Commands ----
+
+# Check all quotas in a namespace
+kubectl -n quota-lab describe quota
+
+# Check all limit ranges
+kubectl -n quota-lab describe limitrange
+
+# Check events for quota rejections
+kubectl -n quota-lab get events --sort-by=.lastTimestamp | grep -i quota
+
+# See actual vs requested resources
+kubectl -n quota-lab top pods
+
+# ---- Cleanup ----
+kubectl delete ns quota-lab

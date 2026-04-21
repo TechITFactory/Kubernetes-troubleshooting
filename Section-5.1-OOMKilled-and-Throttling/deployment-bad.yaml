@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oom-demo
+  namespace: oom-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: oom-demo } }
+  template:
+    metadata: { labels: { app: oom-demo } }
+    spec:
+      containers:
+      - name: app
+        image: oom-demo:0.1
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            memory: "128Mi"   # <-- app allocates ~300 MiB -> OOM

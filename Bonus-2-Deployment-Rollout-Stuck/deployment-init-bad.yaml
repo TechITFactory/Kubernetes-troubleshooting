@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rollout-init
+  namespace: rollout-lab
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 60
+  selector: { matchLabels: { app: rollout-init } }
+  template:
+    metadata: { labels: { app: rollout-init } }
+    spec:
+      initContainers:
+      - name: init
+        image: busybox:1.36
+        command: ["sh","-c","echo migrating...; exit 1"]   # fails -> main never starts
+      containers:
+      - name: app
+        image: rollout-demo:0.1
+        ports: [{ containerPort: 8080 }]
+        readinessProbe:
+          httpGet: { path: /healthz, port: 8080 }

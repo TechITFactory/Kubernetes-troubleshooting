@@ -1,0 +1,49 @@
+# ---- Scenario 1: ServiceAccount with no permissions ----
+
+# 1. Setup
+kubectl create ns rbac-lab
+kubectl apply -f serviceaccount.yaml
+kubectl -n rbac-lab create deploy web --image=nginx:1.25-alpine
+
+# 2. Try to list pods as dev-user (should fail - no RBAC)
+kubectl --as=system:serviceaccount:rbac-lab:dev-user -n rbac-lab get pods
+# Expect: Error from server (Forbidden): pods is forbidden
+
+# 3. Try to create a deployment as dev-user (should also fail)
+kubectl --as=system:serviceaccount:rbac-lab:dev-user -n rbac-lab create deploy test --image=nginx
+# Expect: Error from server (Forbidden)
+
+# 4. Diagnose with auth can-i
+kubectl auth can-i list pods -n rbac-lab --as=system:serviceaccount:rbac-lab:dev-user
+# Expect: no
+kubectl auth can-i --list -n rbac-lab --as=system:serviceaccount:rbac-lab:dev-user
+
+# ---- Resolve: Grant pod-reader role ----
+
+# 5. Apply Role + RoleBinding
+kubectl apply -f role-and-binding.yaml
+
+# 6. Verify - list pods should now work
+kubectl --as=system:serviceaccount:rbac-lab:dev-user -n rbac-lab get pods
+# Expect: Success - shows the web deployment pods
+
+# 7. Verify - create still fails (only get/list/watch granted)
+kubectl --as=system:serviceaccount:rbac-lab:dev-user -n rbac-lab create deploy test2 --image=nginx
+# Expect: still Forbidden (we only granted read)
+
+# 8. Check permissions again
+kubectl auth can-i list pods -n rbac-lab --as=system:serviceaccount:rbac-lab:dev-user
+# Expect: yes
+kubectl auth can-i create deployments -n rbac-lab --as=system:serviceaccount:rbac-lab:dev-user
+# Expect: no
+
+# ---- Scenario 2: Common pitfall - Role vs ClusterRole ----
+# A Role only works in its own namespace.
+# If dev-user tries to list pods in default namespace:
+kubectl --as=system:serviceaccount:rbac-lab:dev-user -n default get pods
+# Expect: Forbidden (Role is namespaced to rbac-lab)
+
+# To fix: use ClusterRole + ClusterRoleBinding for cross-namespace access
+
+# ---- Cleanup ----
+kubectl delete ns rbac-lab

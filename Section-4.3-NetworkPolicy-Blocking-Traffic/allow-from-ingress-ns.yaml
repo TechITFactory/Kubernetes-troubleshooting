@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-from-ingress-ns
+  namespace: np-lab
+spec:
+  podSelector:
+    matchLabels: { app: web }
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels: { role: ingress }   # requires labeling the source namespace
+    ports:
+    - { protocol: TCP, port: 80 }

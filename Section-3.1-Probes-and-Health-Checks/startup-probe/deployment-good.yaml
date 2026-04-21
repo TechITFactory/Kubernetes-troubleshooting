@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-demo
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: probe-demo } }
+  template:
+    metadata:
+      labels: { app: probe-demo }
+    spec:
+      containers:
+      - name: app
+        image: probe-demo:0.2
+        ports: [{ containerPort: 8080 }]
+        # Gate liveness/readiness until app is healthy
+        startupProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 2
+          failureThreshold: 30
+        livenessProbe:
+          httpGet: { path: /healthz, port: 8080 }
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet: { path: /readyz, port: 8080 }
+          periodSeconds: 5
+          failureThreshold: 3
+        terminationGracePeriodSeconds: 30

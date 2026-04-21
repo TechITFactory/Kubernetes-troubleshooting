@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: echo
+  namespace: edge-lab
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: app.example.local         # we'll curl this host, but service is miswired
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: echo
+            port:
+              number: 8080          # <-- WRONG (service exposes 80)

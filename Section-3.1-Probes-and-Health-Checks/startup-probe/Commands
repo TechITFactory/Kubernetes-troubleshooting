@@ -1,0 +1,23 @@
+# Build & load
+eval $(minikube docker-env)
+docker build -t probe-demo:0.1 .
+
+# Deploy & Observe
+kubectl apply -f deployment-bad.yaml
+kubectl get pods -l app=probe-demo -w
+kubectl describe pod -l app=probe-demo | sed -n '/Events/,$p'
+# Expect: "Liveness probe failed" followed by "Killing container"; Restarts increase
+kubectl logs deploy/probe-demo --all-containers
+kubectl logs pod/<pod-name> --previous   # see prior container logs after restarts
+
+# Rebuild & reload with fix
+# Update image tag to 0.2 (same Dockerfile/code is fine)
+docker build -t probe-demo:0.2 .
+# Minikube:
+eval $(minikube docker-env) && docker build -t probe-demo:0.2 .
+
+# Roll out the fix
+kubectl apply -f deployment-good.yaml
+kubectl rollout status deploy/probe-demo
+kubectl get pods -l app=probe-demo -w
+kubectl describe pod -l app=probe-demo | sed -n '/Events/,$p'

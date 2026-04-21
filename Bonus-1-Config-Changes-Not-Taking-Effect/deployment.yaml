@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: config-demo
+  namespace: config-lab
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: config-demo } }
+  template:
+    metadata: { labels: { app: config-demo } }
+    spec:
+      containers:
+      - name: app
+        image: busybox:1.36
+        command: ["sh","-c","echo LOG_LEVEL=$LOG_LEVEL; echo FEATURE=$FEATURE; sleep 3600"]
+        envFrom:
+        - configMapRef: { name: app-settings }

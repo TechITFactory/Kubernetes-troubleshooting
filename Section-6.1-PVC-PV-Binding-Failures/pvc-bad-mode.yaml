@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-badmode
+  namespace: storage-lab
+spec:
+  accessModes: ["ReadWriteMany"]   # many drivers on laptops don't support RWX
+  resources:
+    requests: { storage: 1Gi }
+  storageClassName: standard

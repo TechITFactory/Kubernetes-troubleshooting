@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: failing-health-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: failing-health-demo
+  template:
+    metadata:
+      labels:
+        app: failing-health-demo
+    spec:
+      containers:
+      - name: app
+        image: failing-health-app:v1
+        imagePullPolicy: Never  # For local images
+        ports:
+        - containerPort: 3000
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5   # TOO AGGRESSIVE - app needs 60s to be healthy
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2      # TOO STRICT - fails after only 2 attempts
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10  # TOO AGGRESSIVE - will start failing immediately
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3      # Will cause container restarts
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: failing-health-service
+spec:
+  selector:
+    app: failing-health-demo
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: ClusterIP

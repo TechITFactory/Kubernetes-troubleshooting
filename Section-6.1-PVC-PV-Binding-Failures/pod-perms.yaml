@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app-perms
+  namespace: storage-lab
+spec:
+  securityContext:
+    fsGroup: 2000               # ensure group ownership on mount
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","touch /data/test && ls -l /data && sleep 3600"]
+    volumeMounts:
+    - { name: data, mountPath: /data }
+  volumes:
+  - name: data
+    persistentVolumeClaim: { claimName: data-badsc }   # use the bound PVC from scenario 1

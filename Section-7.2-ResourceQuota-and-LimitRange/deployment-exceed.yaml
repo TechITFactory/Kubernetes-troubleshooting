@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quota-test
+  namespace: quota-lab
+spec:
+  replicas: 5
+  selector: { matchLabels: { app: quota-test } }
+  template:
+    metadata: { labels: { app: quota-test } }
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.25-alpine
+        resources:
+          requests:
+            cpu: "500m"        # 5 replicas x 500m = 2500m > quota 2000m
+            memory: "128Mi"
+          limits:
+            cpu: "1"
+            memory: "256Mi"

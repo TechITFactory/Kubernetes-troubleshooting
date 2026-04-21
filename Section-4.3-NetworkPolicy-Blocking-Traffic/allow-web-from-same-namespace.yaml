@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-same-ns
+  namespace: np-lab
+spec:
+  podSelector:
+    matchLabels:
+      app: web                 # Deployment web pods carry label app=web
+  policyTypes: ["Ingress"]
+  ingress:
+  - from:
+    - podSelector: {}          # any pod in np-lab (tighten as needed)
+    ports:
+    - protocol: TCP
+      port: 80

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-key-demo
+spec:
+  containers:
+  - name: app
+    image: busybox:1.36
+    command: ["sh","-c","cat /etc/app/app.conf || true; sleep 3600"]
+    volumeMounts:
+    - name: cfg
+      mountPath: /etc/app
+  volumes:
+  - name: cfg
+    configMap:
+      name: app-config
+      items:
+      - key: app.conf       # if this key doesn't exist -> CreateContainerConfigError
+        path: app.conf

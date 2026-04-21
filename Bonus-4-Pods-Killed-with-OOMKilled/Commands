@@ -1,0 +1,37 @@
+# ---- Scenario: Pods repeatedly OOMKilled ----
+
+# 1. Setup
+kubectl create ns oomkill-lab
+
+# 2. Deploy memory-leaking containers
+kubectl -n oomkill-lab apply -f deployment-leaker.yaml
+kubectl -n oomkill-lab get pods -l app=oomkill-demo -w
+# Expect: Pods restart with OOMKilled status
+
+# 3. Diagnose
+kubectl -n oomkill-lab describe pod -l app=oomkill-demo | egrep -i 'Last State|Reason|Exit|OOM|Restart'
+# Expect: Reason: OOMKilled, Exit Code: 137
+kubectl -n oomkill-lab get pods -l app=oomkill-demo
+# Expect: RESTARTS increasing, eventually CrashLoopBackOff
+
+# 4. Check actual memory usage (if pod is alive long enough)
+kubectl top pods -n oomkill-lab
+
+# 5. Check node-level OOM events
+kubectl get events -n oomkill-lab --sort-by=.lastTimestamp | grep -i oom
+
+# ---- Difference from Section 5.1 ----
+# Section 5.1 covers single-container OOM with Python app
+# This bonus covers multi-pod scenarios, diagnosing node-level OOM killer,
+# and the cascade effect when multiple pods compete for memory
+
+# ---- Fix: increase limits or fix the memory leak ----
+
+# 6. Apply fixed deployment
+kubectl -n oomkill-lab apply -f deployment-fixed.yaml
+kubectl -n oomkill-lab rollout status deploy/oomkill-demo
+kubectl -n oomkill-lab get pods -l app=oomkill-demo
+# Pods should now be Running without restarts
+
+# ---- Cleanup ----
+kubectl delete ns oomkill-lab

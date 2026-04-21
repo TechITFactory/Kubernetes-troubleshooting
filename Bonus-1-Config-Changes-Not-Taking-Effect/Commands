@@ -1,0 +1,47 @@
+# ---- Scenario: ConfigMap updated but Pod still uses old values ----
+
+# 1. Setup
+kubectl create ns config-lab
+
+kubectl -n config-lab create configmap app-settings \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=FEATURE=disabled
+
+kubectl -n config-lab apply -f deployment.yaml
+kubectl -n config-lab get pods -l app=config-demo
+kubectl -n config-lab logs deploy/config-demo | head
+# Expect: LOG_LEVEL=info, FEATURE=disabled
+
+# 2. Update the ConfigMap
+kubectl -n config-lab create configmap app-settings \
+  --from-literal=LOG_LEVEL=debug \
+  --from-literal=FEATURE=enabled \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 3. Observe: Pod still shows OLD values (envFrom is baked at Pod start)
+kubectl -n config-lab logs deploy/config-demo | head
+# Still shows: LOG_LEVEL=info, FEATURE=disabled
+
+# ---- Why? ----
+# envFrom / env valueFrom are injected at container start.
+# Updating the ConfigMap does NOT restart existing Pods.
+
+# ---- Fix Option A: Restart the deployment ----
+kubectl -n config-lab rollout restart deploy/config-demo
+kubectl -n config-lab rollout status deploy/config-demo
+kubectl -n config-lab logs deploy/config-demo | head
+# Now shows: LOG_LEVEL=debug, FEATURE=enabled
+
+# ---- Fix Option B: Use a volume mount (auto-refreshes) ----
+# Mount the ConfigMap as a file instead of envFrom.
+# Kubelet refreshes mounted ConfigMap files every ~60s (configurable).
+# Your app must re-read the file to pick up changes.
+
+# ---- Fix Option C: Hash annotation pattern ----
+# Add an annotation with the ConfigMap hash so template changes trigger rollout:
+# metadata:
+#   annotations:
+#     configmap-hash: $(kubectl -n config-lab get cm app-settings -o jsonpath='{.metadata.resourceVersion}')
+
+# ---- Cleanup ----
+kubectl delete ns config-lab

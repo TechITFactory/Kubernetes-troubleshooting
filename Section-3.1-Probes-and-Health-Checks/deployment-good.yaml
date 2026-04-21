@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-demo-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: health-demo
+  template:
+    metadata:
+      labels:
+        app: health-demo
+    spec:
+      containers:
+      - name: app
+        image: failing-health-app:v2
+        imagePullPolicy: Never  # For local images
+        ports:
+        - containerPort: 3000
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 3000
+          initialDelaySeconds: 15  # Wait for app initialization
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        livenessProbe:
+          httpGet:
+            path: /alive
+            port: 3000
+          initialDelaySeconds: 20   # Start after readiness probe
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 5       # More lenient for liveness
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-demo-service
+spec:
+  selector:
+    app: health-demo
+  ports:
+  - port: 80
+    targetPort: 3000
+  type: ClusterIP
