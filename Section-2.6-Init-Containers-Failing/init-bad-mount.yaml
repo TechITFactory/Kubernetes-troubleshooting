@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: init-bad-mount
+  name: init-good-mount
   namespace: init-lab
 spec:
   volumes:
@@ -20,4 +20,4 @@ spec:
     image: busybox:1.36
     command: ["sh","-c","cat /work/flag || echo 'FLAG MISSING'; sleep 3600"]
     volumeMounts:
-    - { name: work-b, mountPath: /work }   # reads from work-b (wrong)
+    - { name: work-a, mountPath: /work }   # reads from work-b (wrong)
