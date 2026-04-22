@@ -1,3 +1,9 @@
+# 0. Setup (Prerequisites)
+minikube addons enable metrics-server
+# Wait ~1-2 minutes for the metrics-server to start and collect data
+kubectl get pods -n kube-system | grep metrics-server
+kubectl top nodes # Verify metrics server is working
+
 # 1. Build & load
 eval $(minikube docker-env)
 docker build -t oom-demo:0.1 .
@@ -25,6 +31,6 @@ docker build -t oom-demo:0.2 .
 kubectl -n oom-lab set image deploy/oom-demo app=oom-demo:0.2
 kubectl -n oom-lab rollout status deploy/oom-demo
 
-# 5. Verify
+# 5. Verify & Monitor
 kubectl -n oom-lab describe pod -l app=oom-demo | egrep -i 'Last State|Reason|Restart'
 kubectl top pods -n oom-lab

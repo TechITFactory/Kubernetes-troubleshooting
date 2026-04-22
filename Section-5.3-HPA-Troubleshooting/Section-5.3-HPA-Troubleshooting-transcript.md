@@ -1,35 +1,43 @@
-# Section 5.3 — HPA Troubleshooting (video transcript)
+# Section 5.3 — HPA Troubleshooting (Video Transcript)
 
-Use this as a spoken script for the `Section-5.3-HPA-Troubleshooting` lab. Adjust pacing to your demo length.
+Use this as a spoken script for the `Section-5.3-HPA-Troubleshooting` lab. Adjust your pacing to match your demo length.
 
 ---
 
 **Intro**
 
-Hi. This section is about the **Horizontal Pod Autoscaler** — **HPA** scales **replicas** based on **metrics**, often **CPU**. If **HPA never scales** when you expect, the problem is often **not** the HPA object itself but **bad CPU requests** — **requests** so **large** that **actual** CPU usage is **a tiny fraction** of the **request**, so **percentage** utilization **never** crosses your **target**.
+Hi! In this section, we'll dive into troubleshooting the **Horizontal Pod Autoscaler (HPA)**. As you know, HPA scales pod **replicas** based on **metrics**, most commonly **CPU utilization**.
 
-We **deploy** with **inflated requests**, run **load**, watch **HPA** stay **flat**, then **fix** with **right-sized requests** and optional **`hpa.yaml`** for **behavior**.
+If your **HPA never scales** as expected, the issue is often not the HPA object itself, but rather **inaccurate CPU requests**. When **requests** are set too **high**, the **actual** CPU usage remains a tiny fraction of that request. As a result, the **percentage utilization** never reaches your threshold, and the HPA stays idle.
+
+In this demo, we will **deploy** an app with **inflated requests**, apply **load**, and watch the **HPA** fail to scale. Then, we'll **fix** it by applying **right-sized requests** and an optional **`hpa.yaml`** to fine-tune scaling behavior.
 
 ---
 
-**How CPU percent works**
+**How CPU Percentage Works**
 
-**HPA** uses **`actual CPU` / `CPU request`** for each pod — **not** limit. If **`request`** is **1000 millicores** but the app uses **~100m**, **utilization** is **~10%** — **below** a **50%** target — **no scale-up**.
+The **HPA** calculates utilization using the formula: **`actual CPU usage` / `CPU request`** for each pod. It's important to note that it uses the **request**, not the limit. 
+
+For example, if your **request** is **1000 millicores** (1 CPU) but the app only uses **~100m**, your **utilization** is only **~10%**. If your scaling **target** is **50%**, no scale-up will ever occur because the percentage remains too low.
 
 ---
 
 **Demo**
 
-**Build** the **demo image**, apply **`deploy-bad`** with **huge** **CPU requests**, then **`kubectl autoscale`** with **50%** CPU. Run a **loader** loop hitting the app. **`describe hpa`** — **targets** look **low**; **replicas** don’t **climb**.
+First, we'll **build** the **demo image** and apply **`deploy-bad`**, which uses **excessive CPU requests**. We'll then set up **`kubectl autoscale`** with a **50%** CPU target. 
 
-**Fix:** apply **`deploy-good`** — **smaller** **requests** matching **real** usage — **wait**, then **HPA** should **scale** when **load** pushes **CPU%** over **50%**.
+Next, we'll run a **load generator** loop to hit the app. You'll notice that when we **`describe hpa`**, the **utilization** remains very low, and the **replica count** doesn't climb.
 
-**Optional:** apply **`hpa.yaml`** for **stabilization** windows — **reduce** **flapping**.
+To **fix** this, we'll apply **`deploy-good`**. This configuration Uses **smaller requests** that accurately match the app's **real-world** usage. Once applied, we'll wait for the metrics to sync; the **HPA** will then **scale** as the **load** pushes the **CPU utilization** past the **50%** threshold.
+
+Finally, we'll optionally apply **`hpa.yaml`** to configure **stabilization windows**, which helps **reduce flapping** (rapid scaling up and down).
 
 ---
 
 **Closing**
 
-**HPA not scaling:** check **`requests`**, **`metrics-server`**, **`kubectl top`**, and **HPA** **`describe`**. **Wrong requests** = **wrong percentage** = **wrong scaling**.
+If your **HPA isn't scaling**, remember to check your **requests**, ensure the **metrics-server** is healthy, use **`kubectl top`** to see actual usage, and always check the **HPA description**. 
 
-Thanks for watching.
+Remember: **Inaccurate requests** lead to **wrong percentages**, which results in **incorrect scaling**.
+
+Thanks for watching!
