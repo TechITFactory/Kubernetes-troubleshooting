@@ -17,5 +17,8 @@ kubectl -n dns-lab exec tester -- nslookup google.com || true
 kubectl -n dns-lab apply -f allow-dns.yaml
 
 # 5. Re-test (should succeed)
-kubectl -n dns-lab exec tester -- nslookup kubernetes.default
 kubectl -n dns-lab exec tester -- nslookup google.com
+kubectl -n dns-lab exec tester -- nslookup kubernetes.default.svc.cluster.local
+
+# ---- Cleanup ----
+kubectl delete ns dns-lab

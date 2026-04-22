@@ -22,9 +22,9 @@ Pods rely on the **cluster DNS** service — usually **CoreDNS** in **`kube-syst
 
 We create a **sandbox namespace** and a **busybox** pod used as a **tester**. We apply a **default-deny egress** policy — **only** egress explicitly allowed is permitted.
 
-Then we run **`nslookup kubernetes.default`** and **`nslookup`** to an external name. **Expect failures** — DNS is blocked.
+Then we run **`nslookup google.com`** and **`nslookup`** for internal services like **`kubernetes.default`**. **Expect failures** — DNS is blocked.
 
-**Fix:** apply **`allow-dns.yaml`** — allow **UDP and TCP port 53** to **kube-dns** — and **re-test**. **Expect** internal and external resolution to **succeed** again, assuming you also allow whatever else you need for external lookups if your policy is strict.
+**Fix:** apply **`allow-dns.yaml`** — allow **UDP and TCP port 53** to **kube-dns** — and **re-test**. **Expect** internal and external resolution to **succeed** again.
 
 ---
 
