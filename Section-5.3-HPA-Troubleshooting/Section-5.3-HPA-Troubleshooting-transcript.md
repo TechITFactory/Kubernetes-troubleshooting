@@ -8,9 +8,7 @@ Use this as a spoken script for the `Section-5.3-HPA-Troubleshooting` lab. Adjus
 
 Hi! In this section, we'll dive into troubleshooting the **Horizontal Pod Autoscaler (HPA)**. As you know, HPA scales pod **replicas** based on **metrics**, most commonly **CPU utilization**.
 
-If your **HPA never scales** as expected, the issue is often not the HPA object itself, but rather **inaccurate CPU requests**. When **requests** are set too **high**, the **actual** CPU usage remains a tiny fraction of that request. As a result, the **percentage utilization** never reaches your threshold, and the HPA stays idle.
-
-In this demo, we will **deploy** an app with **inflated requests**, apply **load**, and watch the **HPA** fail to scale. Then, we'll **fix** it by applying **right-sized requests** and an optional **`hpa.yaml`** to fine-tune scaling behavior.
+In this demo, we'll see a common pitfall: **over-provisioning**. By setting requests too high (initially **1000m**), we aren't just "vertically scaling" the pod safely—we are actually **blinding the HPA**. We'll show how this "inflated request" prevents scaling even under load, and then we'll fix it by **right-sizing** those requests so the HPA can finally see the real CPU pressure.
 
 ---
 
@@ -18,7 +16,9 @@ In this demo, we will **deploy** an app with **inflated requests**, apply **load
 
 The **HPA** calculates utilization using the formula: **`actual CPU usage` / `CPU request`** for each pod. It's important to note that it uses the **request**, not the limit. 
 
-For example, if your **request** is **1000 millicores** (1 CPU) but the app only uses **~100m**, your **utilization** is only **~10%**. If your scaling **target** is **50%**, no scale-up will ever occur because the percentage remains too low.
+For example, if your **request** is **1000 millicores** (1 CPU) but the app only uses **~100m**, your **utilization** is only **~10%**. If your scaling **target** is **50%**, your pod will never scale until it hits **500m**. 
+
+Wait, you might think: *"If I just give it 1 whole CPU, it works like vertical scaling anyway, so who cares?"* Well, the problem is **efficiency** and **responsiveness**. Over-provisioning wastes money, takes up unnecessary node capacity, and more importantly, it prevents the HPA from creating **new pods** to handle traffic when that single pod eventually hits its limit.
 
 ---
 
