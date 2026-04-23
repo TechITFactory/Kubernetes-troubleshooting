@@ -46,27 +46,6 @@ This course doesn't just show you YAML. It gives you the tools to:
 *   **[7.1 RBAC Failures](Section-7.1-RBAC-Failures)**: Fixing "Forbidden" errors.
 *   **[7.2 ResourceQuota & LimitRange](Section-7.2-ResourceQuota-and-LimitRange)**: Cluster-level resource guardrails.
 
----
-
-## 🗺️ Troubleshooting Flowchart
-```mermaid
-graph TD
-    A[Pod Not Healthy] --> B{Status?}
-    B -- Pending --> C[Check Resources/Taints/PVC]
-    B -- CrashLoopBackOff --> D[Check Logs/Env/Probes]
-    B -- ImagePullBackOff --> E[Check Image Name/Auth]
-    B -- Running but failing probes --> F[Readiness vs Liveness]
-    B -- Terminating --> G[Grace Period/Finalizers]
-    
-    C --> C1[kubectl describe pod]
-    D --> D1[kubectl logs --previous]
-    E --> E1[Check Secrets/Image Name]
-    F --> F1[kubectl describe / logs]
-    G --> G1[kubectl patch / sigterm]
-```
-
----
-
 ## 🚀 Getting Started
 1. Install **Minikube** or **Kind**.
 2. Clone this repo.
