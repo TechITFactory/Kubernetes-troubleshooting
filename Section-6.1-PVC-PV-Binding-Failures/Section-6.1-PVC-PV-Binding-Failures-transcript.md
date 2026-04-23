@@ -4,38 +4,30 @@ Use this as a spoken script for the `Section-6.1-PVC-PV-Binding-Failures` lab. A
 
 ---
 
-**Intro**
+Hi! In this section, we’re troubleshooting **PersistentVolumeClaims (PVCs)**. If your PVC is stuck in **Pending**, it usually isn’t a mystery; the reason is almost always documented in the **PVC events**. 
 
-Hi. This section is about **PersistentVolumeClaims** — **PVCs** — and why they stay **Pending** or **never bind**. Common causes: **wrong StorageClass** name, **access mode** the **provisioner** doesn’t support, or **permissions** on the **volume** when the pod **mounts**.
-
-We run **three threads**: **bad StorageClass**, **ReadWriteMany vs ReadWriteOnce**, and **mount permissions** with **`fsGroup`**.
+We’ll explore three common scenarios: **missing StorageClasses**, **unsupported access modes**, and one of the most common points of confusion: **`WaitForFirstConsumer`** binding behavior. We’ll also touch on **volume permissions** using **`fsGroup`**.
 
 ---
 
-**Scenario one — StorageClass doesn’t exist**
+First, let’s apply **`pvc-bad-sc.yaml`**. Here, the **`storageClassName`** is set to a name that doesn't exist in our cluster. If we **`describe pvc`**, we'll see an event explicitly stating the **StorageClass was not found**. Consequently, any **Pod** using this PVC will be stuck in **Pending** because it’s waiting on an **unbound** claim.
 
-Apply **`pvc-bad-sc.yaml`** — **`storageClassName`** points at a **class** that **isn’t** in the cluster. **`describe pvc`** — **events** say **storage class not found** or **provisioning** failed. The **pod** stays **waiting** on an **unbound** claim.
-
-**Fix:** **patch** the PVC to **`standard`** — or whatever your cluster’s **default** is — or **set** **`storageClassName`** to **null** to use the **default** **StorageClass**. **Watch** **PVC** go **Bound** and **pod** go **Running**.
+**To fix this**, we can **patch** the PVC to use a valid class, like **`standard`**, or set the class to **null** to let the cluster use its **default** StorageClass. As soon as we patch it, you’ll see the PVC transition to **Bound** and the pod move to **Running**.
 
 ---
 
-**Scenario two — access mode mismatch**
+Next, we look at **Access Mode mismatches**. In **`pvc-bad-mode.yaml`**, we request **ReadWriteMany (RWX)**. However, many local storage provisioners (like the one in Minikube) only support **ReadWriteOnce (RWO)**. 
 
-Apply **`pvc-bad-mode.yaml`** — e.g. **ReadWriteMany** when the **driver** only supports **ReadWriteOnce**. **`describe pvc`** — **no** compatible **volume** or **provisioner** **error**.
+When this happens, the PVC will stay **Pending** because the provisioner says "I can't satisfy this requirement." A critical detail here: **access modes are immutable** on most PVCs once created. So while we might try to patch it, you often have to **delete and recreate** the PVC with the correct mode, such as **ReadWriteOnce**, to fix the binding failure.
 
-**Fix:** **patch** to **ReadWriteOnce** if that’s what your **storage** supports — or **delete** and **recreate** the PVC if **fields** are **immutable**.
-
----
-
-**Scenario three — permissions**
-
-Apply **`pod-perms.yaml`** — **fsGroup** and **volume** **permissions** — **try yourself** per the **Commands**; **symptoms** include **Permission denied** in **logs** if **UID** / **GID** don’t match **mount** options.
+Also, keep an eye out for **`volumeBindingMode: WaitForFirstConsumer`**. In many modern clusters, your PVC will stay **Pending** on purpose until a **Pod** is scheduled that actually needs it. This isn't an error—it's a feature that ensures the volume is created in the same **zone** as your pod!
 
 ---
+
+Finally, even when a volume binds, the pod might crash with **Permission Denied** errors. We use **`pod-perms.yaml`** to demonstrate how **`fsGroup`** in the **SecurityContext** can fix this by automatically changing the group owner of the mounted volume to match the pod’s needs.
 
 **Closing**
 
-**PVC Pending:** **StorageClass**, **accessModes**, **size**, **provisioner**. **Pod waiting on PVC:** **`describe pvc`** and **`describe pod`** **events** first.
+If your PVC is **Pending**, remember the checklist: Check the **StorageClass**, verify the **accessModes** and **size**, and look for **`WaitForFirstConsumer`** delays. Always start your investigation with **`kubectl describe pvc`**.
 
-Thanks for watching.
+Thanks for watching!

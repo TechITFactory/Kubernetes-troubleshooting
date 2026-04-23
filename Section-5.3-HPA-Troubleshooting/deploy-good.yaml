@@ -20,3 +20,16 @@ spec:
           limits:
             cpu: "500m"            # headroom to avoid throttling
             memory: "256Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hpa-demo
+  namespace: hpa-lab
+spec:
+  selector: { app: hpa-demo }
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080            

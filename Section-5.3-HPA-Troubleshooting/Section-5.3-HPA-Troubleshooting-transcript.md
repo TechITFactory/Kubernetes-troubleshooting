@@ -26,7 +26,9 @@ Wait, you might think: *"If I just give it 1 whole CPU, it works like vertical s
 
 First, we'll **build** the **demo image** and apply **`deploy-bad`**, which uses **excessive CPU requests**. We'll then set up **`kubectl autoscale`** with a **50%** CPU target. 
 
-Next, we'll run a **load generator** loop to hit the app. You'll notice that when we **`describe hpa`**, the **utilization** remains very low, and the **replica count** doesn't climb.
+Next, we'll run a **load generator** loop to hit the app. If you see some **Warning** events like **`FailedGetResourceMetric`** in the first minute, **don't panic**. This is normal while the **metrics-server** collects the first few data points. 
+
+As soon as the metrics sync, you'll notice that when we **`describe hpa`**, the **utilization** remains very low—around **0% or 1%**—because of our intentionally huge requests. The **replica count** won't climb because the math (**current / target**) stays well below our threshold.
 
 To **fix** this, we'll apply **`deploy-good`**. This configuration Uses **smaller requests** that accurately match the app's **real-world** usage. Once applied, we'll wait for the metrics to sync; the **HPA** will then **scale** as the **load** pushes the **CPU utilization** past the **50%** threshold.
 
