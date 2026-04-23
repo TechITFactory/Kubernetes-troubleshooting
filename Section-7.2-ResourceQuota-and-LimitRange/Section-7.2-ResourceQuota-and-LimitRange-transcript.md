@@ -12,9 +12,9 @@ Troubleshooting these can be tricky because errors often appear in different pla
 
 ---
 
-First, we’ll apply **`deployment-exceed.yaml`**. This deployment requests more total CPU than our quota allows. 
+First, we’ll apply **`deployment-exceed.yaml`**. This deployment requests 5 replicas, each asking for 500 millicores. That’s a total of 2500 millicores—but our quota is only 2000. 
 
-Here is the first troubleshooting trap: the **Deployment** itself will appear **Successful**, but your **pods** won't appear. That's because the Deployment creates a **ReplicaSet**, and it's the **ReplicaSet controller** that is being rejected by the Quota. You have to **`describe rs`** to see the "exceeded quota" event. 
+Here is the first troubleshooting trap: the **Deployment** will appear **Successful**, but you'll notice that the pod count is stuck at 4 out of 5. Because the **ReplicaSet controller** is being rejected by the Quota, the 5th pod is never even created. To see the actual error message, you have to **`describe rs`** and look for the "failed quota" event.
 
 **To fix this**, we’ll apply **`deployment-fixed.yaml`**, which lowers the per-pod requests so the total fits within our **2000 millicore** limit.
 
