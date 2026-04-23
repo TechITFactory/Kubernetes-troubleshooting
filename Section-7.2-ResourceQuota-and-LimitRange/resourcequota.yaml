@@ -5,7 +5,7 @@ metadata:
   namespace: quota-lab
 spec:
   hard:
-    requests.cpu: "2"
+    requests.cpu: "2" # This is equivalent to 2000m
     requests.memory: 2Gi
     limits.cpu: "4"
     limits.memory: 4Gi

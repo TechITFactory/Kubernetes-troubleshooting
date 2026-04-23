@@ -4,11 +4,17 @@ Use this as a spoken script for the `Section-7.2-ResourceQuota-and-LimitRange` l
 
 ---
 
-Hi! This section is about **ResourceQuotas** and **LimitRanges** — the essential guardrails for multi-tenant clusters. 
+---
 
-A **ResourceQuota** sets a hard cap on the **total** resources a namespace can consume, while a **LimitRange** enforces rules at the **individual pod** level—setting minimums, maximums, and—crucially—**default values**. 
+**Introduction**
 
-Troubleshooting these can be tricky because errors often appear in different places depending on what’s being violated. We’ll show you how to find these "invisible" errors and how to align your deployments with the cluster’s policies.
+Welcome back! In this lesson, we’re diving into **Section 7.2: ResourceQuotas and LimitRanges**. 
+
+As your Kubernetes infrastructure grows, managing how much CPU and memory each team or application uses becomes critical. These two features—ResourceQuotas and LimitRanges—are the essential guardrails for maintaining cluster stability in multi-tenant environments. 
+
+Today, we’re going to show you how to troubleshoot scenarios where these guardrails might seem "invisible," causing deployments to fail or pods to behave unexpectedly. Let's get started.
+
+---
 
 ---
 
@@ -38,8 +44,12 @@ But the real "silent" issue with LimitRanges is **Default Injection**. If a deve
 
 ---
 
-**Closing**
+---
 
-**Pods pending / RS stuck:** **quota** and **limitrange** **first** in **multi-tenant** **namespaces**. **Align** **requests** with **policy** and **team** **budgets**.
+**Conclusion**
 
-Thanks for watching.
+To wrap up, remember that **ResourceQuotas** and **LimitRanges** are your first line of defense against resource exhaustion and "noisy neighbor" problems. 
+
+When you encounter pods that are pending or ReplicaSets that refuse to scale, don't just look at the pod logs. Use **`kubectl describe quota`** and **`kubectl describe rs`** to check for policy violations. And always be aware of **Default Injection** from LimitRanges, as it can silently push you over your namespace caps.
+
+Mastering these troubleshooting techniques ensures that your applications stay within their allocated budgets while keeping the rest of the cluster healthy. Great job on completing this section—I'll see you in the next lesson!
