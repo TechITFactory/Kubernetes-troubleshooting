@@ -16,15 +16,15 @@ First, let’s apply **`pvc-bad-sc.yaml`**. Here, the **`storageClassName`** is 
 
 ---
 
-Next, we look at **Access Mode mismatches**. In **`pvc-bad-mode.yaml`**, we request **ReadWriteMany (RWX)**. However, many local storage provisioners (like the one in Minikube) only support **ReadWriteOnce (RWO)**. 
+Next, we look at **Volume Mode mismatches**. In **`pvc-bad-mode.yaml`**, we request **`volumeMode: Block`**. While common in high-performance cloud environments, many local provisioners (like the one in Minikube) only support the default **`Filesystem`** mode.
 
-When this happens, the PVC will stay **Pending** because the provisioner says "I can't satisfy this requirement." A critical detail here: **access modes are immutable** on most PVCs once created. So while we might try to patch it, you often have to **delete and recreate** the PVC with the correct mode, such as **ReadWriteOnce**, to fix the binding failure.
+When you apply this, the PVC will stay **Pending** with an error like "provisioner does not support block volume." This is a classic case of requesting a feature your underlying storage provider can't deliver. Because **Volume Mode is immutable**, you’ll need to delete the PVC and recreate it with the correct mode to fix it.
 
 Also, keep an eye out for **`volumeBindingMode: WaitForFirstConsumer`**. In many modern clusters, your PVC will stay **Pending** on purpose until a **Pod** is scheduled that actually needs it. This isn't an error—it's a feature that ensures the volume is created in the same **zone** as your pod!
 
 ---
 
-Finally, even when a volume binds, the pod might crash with **Permission Denied** errors. We use **`pod-perms.yaml`** to demonstrate how **`fsGroup`** in the **SecurityContext** can fix this by automatically changing the group owner of the mounted volume to match the pod’s needs.
+Finally, even when a volume binds, the pod might crash with **Permission Denied** errors if the container's user doesn't have the right access. If we apply **`pod-perms-bad.yaml`**, we'll see the pod fail to write its data. We then use **`pod-perms.yaml`** to demonstrate how **`fsGroup`** in the **SecurityContext** can fix this by automatically changing the group ownership of the mounted volume.
 
 **Closing**
 

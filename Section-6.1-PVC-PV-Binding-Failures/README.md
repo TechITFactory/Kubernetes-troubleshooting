@@ -5,12 +5,12 @@ Persistent Storage is complex in Kubernetes because it involves StorageClasses, 
 
 ## 🔍 Why PVCs stay "Pending"
 1.  **StorageClass Not Found**: Typo or referencing a class that isn't on your cluster.
-2.  **AccessMode Mismatch**: Requesting `ReadWriteMany` on a driver that only supports `ReadWriteOnce`.
+2.  **VolumeMode Mismatch**: Requesting `Block` storage on a driver that only supports `Filesystem`.
 3.  **Namespace Mismatch**: PVCs are namespaced, PVs are global.
 
 ## 🛠️ Lab: Reproduce & Fix
 1.  **Scenario 1**: Request a PVC with `storageClassName: does-not-exist`.
-2.  **Scenario 2**: Request `ReadWriteMany` on a standard Minikube/Kind cluster.
+2.  **Scenario 2**: Request `volumeMode: Block` on a standard Minikube/Kind cluster.
 3.  **Scenario 3**: Fix permissions using `fsGroup` in the security context.
 
 ## 📜 Key Commands
