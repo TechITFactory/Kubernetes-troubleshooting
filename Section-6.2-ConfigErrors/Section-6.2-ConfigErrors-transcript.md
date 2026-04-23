@@ -4,27 +4,21 @@ Use this as a spoken script for the `Section-6.2-ConfigErrors` lab. Adjust pacin
 
 ---
 
-**Intro**
+Hi! In this section, we’re looking at **ConfigMaps** and **Secrets**. These are fundamental for providing configuration and sensitive data to your apps. However, if a pod references an object that **doesn't exist** or even just a **key** name that’s misspelled, the container will fail to start. 
 
-Hi. This section is about **ConfigMaps** and **Secrets** **referenced** by pods — when the **object** is **missing** or the **key** name is **wrong**, the **container** never starts normally. You’ll see **`CreateContainerConfigError`** in **`describe pod`** **events**.
-
-We **apply** **`bad-pod.yaml`** without creating **ConfigMap** / **Secret** first, **fix** by **creating** them, then **break** **`broken-keys.yaml`** with a **wrong key** and **fix** that too.
+The primary symptom you’ll see in **`kubectl describe pod`** is the status **`CreateContainerConfigError`**. This tells you that Kubernetes tried to build the container’s environment, but couldn’t find the necessary data.
 
 ---
 
-**Scenario one — missing ConfigMap and Secret**
+First, let's apply **`bad-pod.yaml`**. This pod explicitly expects a ConfigMap named **`app-config`** and a Secret named **`db-credentials`**. Since these don't exist yet, the pod will stay in **`Waiting`** with the reason **`CreateContainerConfigError`**. If you check the **Events**, it will tell you exactly which resource is missing.
 
-**Apply** **`bad-pod.yaml`**. **Pod** stays **`Waiting`** — **`Reason: CreateContainerConfigError`**. **Events** say **configmap** or **secret** **not found**.
-
-**Fix:** **`kubectl create configmap`** and **`kubectl create secret`** with the **names** the pod **expects**. **Delete** the pod so it **re-creates** — or **wait** for **kubelet** **retry** — **logs** should show **env** **values**, **pod** **Running**.
+**To fix this**, we’ll create the missing objects. One important note: once you fix the ConfigMap or Secret, the **kubelet** will eventually retry and start the container. However, if you're in a hurry, you can always **delete and recreate** the pod to force an immediate refresh.
 
 ---
 
-**Scenario two — wrong key in ConfigMap**
+Next, let's look at **Key Mismatches**. In **`broken-keys.yaml`**, the ConfigMap **does** exist, but we’ve asked Kubernetes to mount a specific key—**`app.conf`**—which isn't inside that ConfigMap. This results in the same **`CreateContainerConfigError`**.
 
-**Apply** **`broken-keys.yaml`**. **Events** reference a **key** that **doesn’t exist** on the **ConfigMap**.
-
-**Fix:** **add** the **key** — **`kubectl create configmap ... --dry-run`** **pipe** **`apply`** — or **change** the pod **to** **reference** an **existing** **key**. **Recreate** the pod.
+There’s a subtle but vital difference between using configuration as **environment variables** versus **volumes**. If you update a ConfigMap that is mounted as a **volume**, Kubernetes will eventually project those changes into the container without a restart. But if the ConfigMap provides **environment variables**, those are only set when the container **starts**. This means you **must** recreate the pod to pick up new or fixed environment variables.
 
 ---
 

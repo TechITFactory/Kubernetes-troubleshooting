@@ -3,7 +3,8 @@
 # 1. Deploy & Observe
 kubectl apply -f bad-pod.yaml
 kubectl get pod config-error-demo -w
-kubectl describe pod config-error-demo | sed -n '/Events/,$p'
+# View the specific error in events:
+kubectl get events --field-selector involvedObject.name=config-error-demo
 # Expect: State: Waiting  Reason: CreateContainerConfigError
 
 # 2. Resolve: create the missing objects

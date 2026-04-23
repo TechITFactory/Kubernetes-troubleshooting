@@ -1,6 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
+  namespace: config-lab
   name: config-error-demo
   labels: { app: config-error-demo }
 spec:
