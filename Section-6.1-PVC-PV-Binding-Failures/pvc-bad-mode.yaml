@@ -3,6 +3,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: data-badmode
   namespace: storage-lab
+spec:
   volumeMode: Block                # intentional failure: minikube-hostpath doesn't support block
   accessModes: ["ReadWriteOnce"]
   resources:
