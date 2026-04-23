@@ -1,34 +1,40 @@
+# ---- Setup ----
+kubectl create ns config-lab --dry-run=client -o yaml | kubectl apply -f -
+
 # ---- Scenario 1: Pod referencing a missing ConfigMap & Secret ----
 
 # 1. Deploy & Observe
 kubectl apply -f bad-pod.yaml
-kubectl get pod config-error-demo -w
+kubectl get pod config-error-demo -n config-lab -w
 # View the specific error in events:
-kubectl get events --field-selector involvedObject.name=config-error-demo
+kubectl get events -n config-lab --field-selector involvedObject.name=config-error-demo
 # Expect: State: Waiting  Reason: CreateContainerConfigError
 
 # 2. Resolve: create the missing objects
-kubectl create configmap app-config \
+kubectl create configmap app-config -n config-lab \
   --from-literal=LOG_LEVEL=debug \
   --from-literal=FEATURE_X=enabled
 
-kubectl create secret generic db-credentials \
+kubectl create secret generic db-credentials -n config-lab \
   --from-literal=DATABASE_URL='postgres://demo:demo@postgres:5432/app'
 
 # 3. Recreate or let kubelet retry
-kubectl delete pod config-error-demo --wait
+kubectl delete pod config-error-demo -n config-lab --wait
 kubectl apply -f bad-pod.yaml
-kubectl get pod config-error-demo -w
-kubectl logs config-error-demo | head
+kubectl get pod config-error-demo -n config-lab -w
+kubectl logs config-error-demo -n config-lab | head
 # You should now see env vars printed; Pod is Running.
 
 # ---- Scenario 2: Wrong key name inside ConfigMap ----
 
 # 4. Apply & Observe
 kubectl apply -f broken-keys.yaml
-kubectl describe pod bad-key-demo | sed -n '/Events/,$p'
+kubectl -n config-lab describe pod bad-key-demo | sed -n '/Events/,$p'
 
 # 5. Fix by adding the missing key
-kubectl create configmap app-config --from-literal=app.conf='PORT=8080' --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap app-config -n config-lab --from-literal=app.conf='PORT=8080' --dry-run=client -o yaml | kubectl apply -f -
 # Or edit the items[].key to an existing key name.
-kubectl delete pod bad-key-demo --wait && kubectl apply -f broken-keys.yaml
+kubectl delete pod bad-key-demo -n config-lab --wait && kubectl apply -f broken-keys.yaml
+
+# ---- Cleanup ----
+# kubectl delete ns config-lab

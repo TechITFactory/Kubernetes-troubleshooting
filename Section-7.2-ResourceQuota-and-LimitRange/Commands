@@ -37,6 +37,15 @@ kubectl -n quota-lab run big-pod --image=nginx \
 kubectl -n quota-lab run ok-pod --image=nginx \
   --overrides='{"spec":{"containers":[{"name":"nginx","image":"nginx","resources":{"requests":{"cpu":"200m","memory":"128Mi"},"limits":{"cpu":"500m","memory":"256Mi"}}}]}}'
 
+# ---- Scenario 3: Stealth Default Injection ----
+
+# 9. Create a Pod with NO resources specified
+kubectl -n quota-lab run default-pod --image=nginx
+
+# 10. Observe: LimitRange has injected the "defaultRequest"
+kubectl -n quota-lab describe pod default-pod | grep -A 5 "Requests"
+# You should see 100m CPU and 128Mi Memory even though you didn't ask for them!
+
 # ---- Discovery Commands ----
 
 # Check all quotas in a namespace

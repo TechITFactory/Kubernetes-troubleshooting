@@ -44,6 +44,14 @@ kubectl --as=system:serviceaccount:rbac-lab:dev-user -n default get pods
 # Expect: Forbidden (Role is namespaced to rbac-lab)
 
 # To fix: use ClusterRole + ClusterRoleBinding for cross-namespace access
+# We can bind the existing "view" ClusterRole (built-in) to our ServiceAccount
+kubectl create clusterrolebinding dev-user-global-view \
+  --clusterrole=view \
+  --serviceaccount=rbac-lab:dev-user
+
+# Verify - can now list pods in default namespace
+kubectl --as=system:serviceaccount:rbac-lab:dev-user -n default get pods
+# Expect: Success
 
 # ---- Cleanup ----
 kubectl delete ns rbac-lab

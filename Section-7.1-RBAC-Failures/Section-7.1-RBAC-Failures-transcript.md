@@ -4,31 +4,27 @@ Use this as a spoken script for the `Section-7.1-RBAC-Failures` lab. Adjust paci
 
 ---
 
-**Intro**
+Hi! In this section, we’re troubleshooting **RBAC** — **Role-Based Access Control**. RBAC is the core security mechanism in Kubernetes, but it can be frustrating when you or your apps hit that dreaded **`Forbidden`** error. 
 
-Hi. This section is about **RBAC** — **Role-Based Access Control**. When **`kubectl`** or an **app** using a **ServiceAccount** gets **`Forbidden`**, it’s usually **missing** **Role** or **ClusterRole** **bindings**, or you’re using a **Role** in **one** namespace but **calling** **another**.
-
-We **create** **`dev-user`** **ServiceAccount**, **prove** **list pods** **fails**, **grant** **`pod-reader`** with **Role** + **RoleBinding**, **verify** **read** works and **create** still **fails**, then **note** **ClusterRole** for **cross-namespace** access.
+Usually, the cause is a **missing binding**, a misspelled **verb**, or—most commonly—a **scoping issue** where you've used a **Role** to grant permissions in one namespace, but the app is trying to access resources in another. We’ll walk through how to use **impersonation** to test permissions and how to correctly scope your access.
 
 ---
 
-**Scenario one — no permissions**
+First, let's create a ServiceAccount named **`dev-user`**. To test its permissions without actually logging in as that user, we use the **`--as`** flag. Note the format: **`system:serviceaccount:namespace:name`**. This is how Kubernetes internally identifies service account tokens.
 
-**Apply** **`serviceaccount.yaml`**. As **`dev-user`**, **`kubectl get pods`** → **`Forbidden`**. **`kubectl auth can-i list pods`** → **no**. **`auth can-i --list`** shows **what** is **allowed** — **empty** or **minimal**.
-
----
-
-**Resolve — Role and RoleBinding**
-
-**Apply** **`role-and-binding.yaml`**. **`get pods`** as **`dev-user`** → **works**. **`create deploy`** → still **`Forbidden`** — we only **granted** **get/list/watch**.
-
-**`auth can-i`** — **list** **yes**, **create deployments** **no**.
+Initially, a new ServiceAccount has zero permissions. If we try to **`get pods`**, we’ll get a **Forbidden** error. The most powerful tool in your belt here is **`kubectl auth can-i`**. It allows you to query the API server: *"Can this user perform this action?"* It’s much faster than trial-and-error.
 
 ---
 
-**Pitfall — Role vs ClusterRole**
+To fix this, we apply **`role-and-binding.yaml`**. This creates a **Role** (which contains the rules) and a **RoleBinding** (which connects those rules to our user). 
 
-A **Role** is **namespaced**. **`dev-user`** **cannot** **list** **pods** in **`default`** if the **binding** only applies to **`rbac-lab`**. **Cross-namespace** **read** needs **ClusterRole** + **ClusterRoleBinding** — or **separate** **RoleBindings** per **namespace**.
+Now, **`get pods`** works! But wait—if we try to **create** a deployment, it still fails. This is a perfect example of the **Principle of Least Privilege**. We granted **`list`** and **`get`**, but not **`create`**. When troubleshooting RBAC, always check that the specific **verb** and **resource** in your Role match what the app is actually trying to do.
+
+---
+
+Finally, let’s talk about **Scope**. A **RoleBinding** is namespaced. If **`dev-user`** has permissions in the **`rbac-lab`** namespace, they are still completely **Forbidden** from listing pods in **`default`**. 
+
+This is where the distinction between **Roles** and **ClusterRoles** is critical. If you need a user to have access across the **entire cluster** (all namespaces), you must use a **ClusterRoleBinding**. If you only need them to have access to specific namespaces, you need a separate **RoleBinding** in each one.
 
 ---
 
